@@ -1,0 +1,17 @@
+[
+  {
+    "Sourcefile": null,
+    "Include": "",
+    "Includepath": "/home/cslt19/.arduino15/packages/esp32/hardware/esp32/2.0.17/cores/esp32"
+  },
+  {
+    "Sourcefile": null,
+    "Include": "",
+    "Includepath": "/home/cslt19/.arduino15/packages/esp32/hardware/esp32/2.0.17/variants/esp32s3"
+  },
+  {
+    "Sourcefile": "/home/cslt19/Arduino/blink/build/sketch/blink.ino.cpp",
+    "Include": "",
+    "Includepath": null
+  }
+]
