@@ -7,9 +7,6 @@
 #define TRAILER() {digitalWrite(LED_PIN, 0); delay(REST); digitalWrite(LED_PIN, 1); delay(REST*5);}
 
 
-
-const int rest = 1;
-
 void setup() {
   Serial.begin(115200);
   delay(1000);
