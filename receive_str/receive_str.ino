@@ -112,7 +112,7 @@ void LED_read_binary(char *str) {
             // 1バイト分のデータが揃った
             str[str_len] = data;
             str_len++;
-            Serial.printf(" --> '%c'\r\n", data);
+            // Serial.printf(" --> '%c'\r\n", data);
 
             data = 0; // 次のデータ用に初期化
             binary_len = 0; // 次のデータ用に初期化
