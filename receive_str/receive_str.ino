@@ -1,26 +1,35 @@
 #include "esp_timer.h"
 
+#define LED_PIN  4
 
-int led = 4;
+inline int get_light_intensity()
+{
+  int intensity = 0;
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, 0);
+  pinMode(LED_PIN, INPUT);
+  intensity = analogRead(LED_PIN);
+  return intensity;
+}
 
 void setup() {
   Serial.begin(115200);
-  pinMode(led, OUTPUT);
-  digitalWrite(led, LOW);
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
   delay(100);
 
   // Wait for serial connection
   while (!Serial) {
     ;
   }
-  
-  Serial.printf("Ready to receive strings.");
 }
 
 void loop() {
   char str[100] = "\0";
+  
+  Serial.printf("-----------------------------------\r\n");
   LED_read_binary(str);
-  Serial.printf("str: %s\r\n", str);
+  Serial.printf("Data: %s\r\n\n", str);
 
   delay(5000);
 }
@@ -37,22 +46,23 @@ void LED_read_binary(char *str) {
 
   int threshold = 150;
 
-  pinMode(led, INPUT);
+  pinMode(LED_PIN, INPUT);
   Serial.printf("Ready to read...\r\n");
 
+  Serial.printf("Threshold before calibration: %d\r\n", threshold);
   while(i < 1000) {
     value = get_light_intensity();
     delay(1);
     if (threshold < value) {
       threshold = value;
     }
-    Serial.printf("i: %d, value: %d, threshold: %d\r\n", i, value, threshold);
+    // Serial.printf("i: %d, value: %d, threshold: %d\r\n", i, value, threshold);
     i++;
   }
+  Serial.printf("Threshold after calibration: %d\r\n", threshold);
   delay(1000);
 
-
-
+  
   while(1) {
     time = esp_timer_get_time();
 
@@ -67,7 +77,7 @@ void LED_read_binary(char *str) {
         (signal_unit * 4 < (time - edge_up_time)) &&  // トレイラを読んだ
      	  (edge_down_time < edge_up_time))                // ...
     {
-      Serial.printf("Read end.\r\n\r\n");
+      Serial.printf("Finished receiving.\r\n\r\n");
       break; // 終了
     }
 
@@ -137,12 +147,3 @@ void LED_read_binary(char *str) {
   } // while(1)
 } // LED_read_binary
 
-int get_light_intensity()
-{
-  int intensity = 0;
-  pinMode(led, OUTPUT);
-  digitalWrite(led, 0);
-  pinMode(led, INPUT);
-  intensity = analogRead(led);
-  return intensity;
-}
