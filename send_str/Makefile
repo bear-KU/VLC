@@ -1,7 +1,7 @@
 # Makefile
 
 PORT = /dev/ttyUSB1
-FQBN = esp32:esp32:esp32
+FQBN = esp32:esp32:esp32s3
 PROJECT_DIR = .
 BAUDRATE = 115200
 

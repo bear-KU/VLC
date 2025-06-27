@@ -1,10 +1,28 @@
 #define LED_PIN 4
 #define REST 1
 
-#define LEADER() {digitalWrite(LED_PIN, 1); delay(REST);}
-#define DATA0() {digitalWrite(LED_PIN, 0); delay(REST); digitalWrite(LED_PIN, 1); delay(REST);}
-#define DATA1() {digitalWrite(LED_PIN, 0); delay(REST); digitalWrite(LED_PIN, 1); delay(REST*2);}
-#define TRAILER() {digitalWrite(LED_PIN, 0); delay(REST); digitalWrite(LED_PIN, 1); delay(REST*5);}
+#define SEND_LEADER() { \
+  digitalWrite(LED_PIN, 1); \
+  delay(REST); \
+}
+#define SEND_DATA0() { \
+  digitalWrite(LED_PIN, 0); \
+  delay(REST); \
+  digitalWrite(LED_PIN, 1); \
+  delay(REST); \
+}
+#define SEND_DATA1() { \
+  digitalWrite(LED_PIN, 0); \
+  delay(REST); \
+  digitalWrite(LED_PIN, 1); \
+  delay(REST*2); \
+}
+#define SEND_TRAILER() { \
+  digitalWrite(LED_PIN, 0); \
+  delay(REST); \
+  digitalWrite(LED_PIN, 1); \
+  delay(REST*5); \
+}
 
 
 void setup() {
@@ -44,7 +62,7 @@ void LED_send(String data) {
 
   // リーダ
   // Serial.printf("\r\nリーダ\r\n");
-  LEADER();
+  SEND_LEADER();
 
 
   // データ
@@ -55,16 +73,16 @@ void LED_send(String data) {
     // Serial.printf("%d番目のビット %d\r\n", i%8, data_binary[i]);
 
     if(data_binary[i]) {
-      DATA1();
+      SEND_DATA1();
     }
     else {
-      DATA0();
+      SEND_DATA0();
     }
   }
 
   // トレイラ
   // Serial.printf("\r\nトレイラ\r\n");
-  TRAILER();
+  SEND_TRAILER();
 
   // Serial.printf("\r\nFinised Sending.\r\n\r\n");
   digitalWrite(LED_PIN, 0);
