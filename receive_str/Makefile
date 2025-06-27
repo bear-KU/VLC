@@ -1,7 +1,7 @@
 # Makefile
 
 PORT = /dev/ttyUSB0
-FQBN = esp32:esp32:esp32s3
+FQBN = esp32:esp32:esp32
 PROJECT_DIR = .
 BAUDRATE = 115200
 
@@ -20,4 +20,8 @@ upload:
 screen:
 	screen $(PORT) $(BAUDRATE)
 
-.PHONY: all compile upload screen
+# Clean Build Files
+clean:
+	rm -rf $(PROJECT_DIR)/build
+
+.PHONY: all compile upload screen crean

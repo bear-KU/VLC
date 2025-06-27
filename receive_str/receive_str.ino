@@ -1,16 +1,10 @@
 #include "esp_timer.h"
+#include <Wire.h>
+#include "SSD1306Wire.h"
 
 #define LED_PIN  4
+SSD1306Wire display(0x3c, 21, 22, GEOMETRY_128_32); // I2C address, SDA, SCL
 
-inline int get_light_intensity()
-{
-  int intensity = 0;
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, 0);
-  pinMode(LED_PIN, INPUT);
-  intensity = analogRead(LED_PIN);
-  return intensity;
-}
 
 void setup() {
   Serial.begin(115200);
@@ -31,6 +25,7 @@ void loop() {
   LED_read_binary(str);
   Serial.printf("Data: %s\r\n\n", str);
 
+  draw_display(str);
   delay(5000);
 }
 
@@ -62,7 +57,7 @@ void LED_read_binary(char *str) {
   Serial.printf("Threshold after calibration: %d\r\n", threshold);
   delay(1000);
 
-  
+
   while(1) {
     time = esp_timer_get_time();
 
@@ -147,3 +142,20 @@ void LED_read_binary(char *str) {
   } // while(1)
 } // LED_read_binary
 
+inline int get_light_intensity() {
+  int intensity = 0;
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, 0);
+  pinMode(LED_PIN, INPUT);
+  intensity = analogRead(LED_PIN);
+  return intensity;
+}
+
+void draw_display(char *str) {
+  display.init();
+  display.clear();
+  display.setFont(ArialMT_Plain_16);
+  display.setTextAlignment(TEXT_ALIGN_LEFT);
+  display.drawString(0, 0, str);
+  display.display();
+}
