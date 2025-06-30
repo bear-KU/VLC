@@ -1,28 +1,33 @@
 #define LED_PIN 4
 #define REST 1
 
-#define SEND_LEADER() { \
-  digitalWrite(LED_PIN, 1); \
-  delay(REST); \
+inline void send_leader() {
+  digitalWrite(LED_PIN, 1);
+  delay(REST);
 }
-#define SEND_DATA0() { \
-  digitalWrite(LED_PIN, 0); \
-  delay(REST); \
-  digitalWrite(LED_PIN, 1); \
-  delay(REST); \
+
+inline void send_data0() {
+  digitalWrite(LED_PIN, 0);
+  delay(REST);
+  digitalWrite(LED_PIN, 1);
+  delay(REST);
 }
-#define SEND_DATA1() { \
-  digitalWrite(LED_PIN, 0); \
-  delay(REST); \
-  digitalWrite(LED_PIN, 1); \
-  delay(REST*2); \
+
+inline void send_data1() {
+  digitalWrite(LED_PIN, 0);
+  delay(REST);
+  digitalWrite(LED_PIN, 1);
+  delay(REST*2);
 }
-#define SEND_TRAILER() { \
-  digitalWrite(LED_PIN, 0); \
-  delay(REST); \
-  digitalWrite(LED_PIN, 1); \
-  delay(REST*5); \
+
+inline void send_trailer() {
+  digitalWrite(LED_PIN, 0);
+  delay(REST);
+  digitalWrite(LED_PIN, 1);
+  delay(REST*5);
 }
+
+
 
 inline char dtoc(int n) {
   if (n < 0 || n > 9) return '\0';  
@@ -80,20 +85,20 @@ void LED_send(char* data) {
   Serial.printf("\r\nReady...\r\n");
 
   // リーダ
-  SEND_LEADER();
+  send_leader();
 
   // データ
   for(i=0; i<data_len; i++) {
     if(data[i] == '1') {
-      SEND_DATA1();
+      send_data1();
     }
     else {
-      SEND_DATA0();
+      send_data0();
     }
   }
 
   // トレイラ
-  SEND_TRAILER();
+  send_trailer();
 
   digitalWrite(LED_PIN, 0);
 }
