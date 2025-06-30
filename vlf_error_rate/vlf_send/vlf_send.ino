@@ -42,27 +42,36 @@ void setup() {
   delay(1000);
 
   int i, bit;
-  const int n = 1000;
-  char data[n+1] = {0};
+  const int data_size = 1024;
+  const int chunk_size = 8;
+  int count = data_size / chunk_size;
 
-  for (i=0; i<n; i++) {
+  char data[data_size+1] = {0};
+  char chunk[chunk_size+1] = {0};
+  
+  chunk[data_size] = '\0';
+
+  for (i=0; i<data_size; i++) {
     bit = random(0, 2);
     data[i] = dtoc(bit);
   }
-  data[n] = '\0';
+  
   Serial.printf("Data: %s\r\n", data);
 
-  LED_send(data);
+  for (i=0; i<count; i++) {
+    memcpy(chunk, data + i * chunk_size, chunk_size);
+    Serial.printf("Chunk %d: %s\r\n", i, chunk);
+    LED_send(chunk);
+    delay(5000);
+  }
+
   Serial.printf("End\r\n");
+
 }
 
 void loop() {
 
 }
-
-// int checkbit(char data, int bit) {
-//   return data & (0x80 >> bit);
-// }
 
 void LED_send(char* data) {
   int i;

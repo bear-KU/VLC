@@ -1,11 +1,7 @@
 #include "esp_timer.h"
-// #include <Wire.h>
-// #include "SSD1306Wire.h"
 
-#define MAX_STR_LEN 1000
+#define MAX_STR_LEN 1024
 #define LED_PIN  4
-// SSD1306Wire display(0x3c, 21, 22, GEOMETRY_128_32); // I2C address, SDA, SCL
-
 
 void setup() {
   Serial.begin(115200);
@@ -20,11 +16,12 @@ void setup() {
 
   char data[MAX_STR_LEN+1] = {0};
 
-  Serial.printf("-----------------------------------\r\n");
-  LED_read_binary(data);
-  Serial.printf("Data: %s\r\n", data);
-
-  // draw_display(data);
+  while(1){
+    Serial.printf("-----------------------------------\r\n");
+    LED_read_binary(data);
+    Serial.printf("Data: %s\r\n", data);
+    delay(1000);
+  }
 }
 
 void loop() {
@@ -122,12 +119,3 @@ inline int get_light_intensity() {
   intensity = analogRead(LED_PIN);
   return intensity;
 }
-
-// void draw_display(char *str) {
-//   display.init();
-//   display.clear();
-//   display.setFont(ArialMT_Plain_16);
-//   display.setTextAlignment(TEXT_ALIGN_LEFT);
-//   display.drawString(0, 0, str);
-//   display.display();
-// }

@@ -16,6 +16,10 @@ compile:
 upload:
 	arduino-cli upload -p $(PORT) --fqbn $(FQBN) $(PROJECT_DIR)
 
+# Screen
+screen:
+	screen $(PORT) $(BAUDRATE)
+
 # Log Output
 log:
 	rm -f screenlog.0
