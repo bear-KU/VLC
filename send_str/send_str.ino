@@ -1,5 +1,5 @@
 #define LED_PIN 4
-#define REST 1
+#define REST 100
 
 #define SEND_LEADER() { \
   digitalWrite(LED_PIN, 1); \
@@ -61,16 +61,16 @@ void LED_send(String data) {
   Serial.printf("\r\nReady...\r\n");
 
   // リーダ
-  // Serial.printf("\r\nリーダ\r\n");
+  Serial.printf("\r\nリーダ\r\n");
   SEND_LEADER();
 
 
   // データ
   for(i=0; i<n; i++) {
-    // if (i%8 == 0) {
-    //   Serial.printf("\r\ndata[%d]: %c\r\n", i/8, data[i]);
-    // }
-    // Serial.printf("%d番目のビット %d\r\n", i%8, data_binary[i]);
+    if (i%8 == 0) {
+      Serial.printf("\r\ndata[%d]: %c\r\n", i/8, data[i]);
+    }
+    Serial.printf("%d番目のビット %d\r\n", i%8, data_binary[i]);
 
     if(data_binary[i]) {
       SEND_DATA1();
@@ -81,10 +81,10 @@ void LED_send(String data) {
   }
 
   // トレイラ
-  // Serial.printf("\r\nトレイラ\r\n");
+  Serial.printf("\r\nトレイラ\r\n");
   SEND_TRAILER();
 
-  // Serial.printf("\r\nFinised Sending.\r\n\r\n");
+  Serial.printf("\r\nFinised Sending.\r\n\r\n");
   digitalWrite(LED_PIN, 0);
   delay(5000);
 }
