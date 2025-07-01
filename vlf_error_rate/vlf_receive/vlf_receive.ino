@@ -1,10 +1,7 @@
 #include "esp_timer.h"
-#include <Wire.h>
-#include "SSD1306Wire.h"
 
+#define MAX_STR_LEN 1024
 #define LED_PIN  4
-SSD1306Wire display(0x3c, 21, 22, GEOMETRY_128_32); // I2C address, SDA, SCL
-
 
 void setup() {
   Serial.begin(115200);
@@ -16,27 +13,28 @@ void setup() {
   while (!Serial) {
     ;
   }
+
+  char data[MAX_STR_LEN+1] = {0};
+
+  while(1){
+    Serial.printf("-----------------------------------\r\n");
+    LED_read_binary(data);
+    Serial.printf("Data: %s\r\n", data);
+    delay(1000);
+  }
 }
 
 void loop() {
-  char str[100] = "\0";
   
-  Serial.printf("-----------------------------------\r\n");
-  LED_read_binary(str);
-  Serial.printf("Data: %s\r\n\n", str);
-
-  draw_display(str);
-  delay(5000);
 }
 
-void LED_read_binary(char *str) {
+void LED_read_binary(char *data) {
   int value = 0, prev_v = 0;
   int64_t signal_unit = 0, signal_len = 0;
   int64_t time;
   int64_t edge_down_time = 0;
   int64_t edge_up_time = 0;
-  int str_len = 0, binary_len = 0;
-  unsigned char data = 0;
+  int data_len = 0;
   int i = 0;
 
   int threshold = 150;
@@ -66,60 +64,42 @@ void LED_read_binary(char *str) {
     }
 
     // 終了判定
-    if( (signal_unit != 0) &&                              // リーダを読んだ
-        (signal_unit * 4 < (time - edge_up_time)) &&  // トレイラを読んだ
-     	  (edge_down_time < edge_up_time))                // ...
+    if( (signal_unit != 0) &&
+        (signal_unit * 4 < (time - edge_up_time)) &&
+     	  (edge_down_time < edge_up_time))
     {
       Serial.printf("Finished receiving.\r\n\r\n");
       break; // 終了
     }
 
-    // バイナリデータを判断???
     // 1. 直前が Low，現在が High の場合(立ち上がり)
     if(prev_v == 0 && value != 0) {
-      // ノイズによる誤検出を防ぐ
       if((signal_unit * 0.7) < (time - edge_down_time)) {
         edge_up_time = time;
       } 
     }
     // 2. 直前が High，現在が Low の場合(立ち下がり)
     else if(prev_v != 0 && value == 0) {
-      // ノイズによる誤検出を防ぐ -> TODO: ここはまだ実装していない
-      
       edge_down_time = time;
-
+      
       // デコード
       signal_len = edge_down_time - edge_up_time;
       if(signal_unit == 0) {
-        // 最初の信号(リーダ)の信号長を基本時間 T とする
         signal_unit = signal_len;
       }
       else {
-        // ノイズによる誤検出を防ぐ
-        if(((signal_unit / 2) < signal_len) && str_len < 100) {
+        if(((signal_unit / 2) < signal_len) && data_len < MAX_STR_LEN+1) {
           // データが0/1を判定
           if(signal_unit < signal_len * 0.6) {
-            data |= 0x01;
+            data[data_len] = '1';          
           }
           else {
-            data |= 0x00;
+            data[data_len] = '0';
           }
-          
-          if(binary_len == 7) {
-            // 1バイト分のデータが揃った
-            str[str_len] = data;
-            str_len++;
-
-            data = 0; // 次のデータ用に初期化
-            binary_len = 0; // 次のデータ用に初期化
-          }
-          else {
-            data <<= 1; // 次のビット用に左シフト
-            binary_len++;
-          }
+          data_len++;
         }  
       }
-    } // else if(prev_v != 0 && value != 0))
+    }
     // 3. 直前と現在が同じ場合
     else {
       // 何もしない
@@ -128,7 +108,7 @@ void LED_read_binary(char *str) {
     // 直前の値を更新
     prev_v = value;
 
-  } // while(1)
+  }
 } // LED_read_binary
 
 inline int get_light_intensity() {
@@ -138,13 +118,4 @@ inline int get_light_intensity() {
   pinMode(LED_PIN, INPUT);
   intensity = analogRead(LED_PIN);
   return intensity;
-}
-
-void draw_display(char *str) {
-  display.init();
-  display.clear();
-  display.setFont(ArialMT_Plain_16);
-  display.setTextAlignment(TEXT_ALIGN_LEFT);
-  display.drawString(0, 0, str);
-  display.display();
 }
