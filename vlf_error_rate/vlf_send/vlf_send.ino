@@ -28,59 +28,38 @@ inline void send_trailer() {
 }
 
 
-
-inline char dtoc(int n) {
-  if (n < 0 || n > 9) return '\0';  
-  return '0' + n;
-}
-
-
 void setup() {
   Serial.begin(115200);
+  delay(1000);
 
   pinMode(LED_PIN, OUTPUT);
-
-  Serial.printf("Booting\r\n");
-  delay(1000);
-
-  Serial.printf("Start\r\n");
-  delay(1000);
-
-  int i, bit;
-  const int data_size = 1024;
-  const int chunk_size = 8;
-  int count = data_size / chunk_size;
-
-  char data[data_size+1] = {0};
-  char chunk[chunk_size+1] = {0};
-  
-  chunk[data_size] = '\0';
-
-  for (i=0; i<data_size; i++) {
-    bit = random(0, 2);
-    data[i] = dtoc(bit);
-  }
-  
-  Serial.printf("Data: %s\r\n", data);
-
-  for (i=0; i<count; i++) {
-    memcpy(chunk, data + i * chunk_size, chunk_size);
-    Serial.printf("Chunk %d: %s\r\n", i, chunk);
-    LED_send(chunk);
-    delay(5000);
-  }
-
-  Serial.printf("End\r\n");
-
 }
 
 void loop() {
+  String data = "Hello World!";
 
+  Serial.printf("\r\n----------------------------------------\r\n");
+  Serial.printf("data: %s\r\n", data);
+
+  LED_send(data);
 }
 
-void LED_send(char* data) {
-  int i;
-  int data_len = strlen(data);
+int checkbit(char data, int bit) {
+  return data & (0x80 >> bit);
+}
+
+void LED_send(String data) {
+  int i, j;
+  int n = 0;
+  int data_len = data.length();
+  int data_binary[data_len * 8] = {};
+
+  for(i=0; i<data_len; i++) {
+    for (j=0; j<8; j++) {
+      data_binary[n] = checkbit(data[i], j) ? 1 : 0; // 0 or 1
+      n++;
+    }
+  }
 
   Serial.printf("\r\nReady...\r\n");
 
@@ -88,8 +67,8 @@ void LED_send(char* data) {
   send_leader();
 
   // データ
-  for(i=0; i<data_len; i++) {
-    if(data[i] == '1') {
+  for(i=0; i<n; i++) {
+    if(data_binary[i]) {
       send_data1();
     }
     else {
@@ -101,4 +80,5 @@ void LED_send(char* data) {
   send_trailer();
 
   digitalWrite(LED_PIN, 0);
+  delay(5000);
 }
