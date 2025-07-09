@@ -17,6 +17,8 @@
 #define SEND_BUFFER_SIZE 1024
 #define MAX_CONCURRENT_CONNECTIONS 2
 #define SEND_JSON_SIZE 1100 // JSONデータのサイズ(これより大きくはない)
+#define ROLE_SENDER "SENDER"
+#define ROLE_RECEIVER "RECEIVER"
 
 void *handle_client(void *arg);
 int communication_sender(int sock_data);
@@ -147,20 +149,19 @@ void *handle_client(void *arg) {
     pthread_exit(NULL);
   }
   recv_buf[received_len] = '\0';
-  printf("[Client FD: %d]Received: %s.\n", sock_data, recv_buf);
+  printf("[Client FD: %d]Received: %s\n", sock_data, recv_buf);
 
   // SENDER または RECEIVER の役割を確認
-  if(strcmp(recv_buf, "SENDER")==0) {
+  if(strncmp(recv_buf, ROLE_SENDER, strlen(ROLE_SENDER))==0) {
     int ret = communication_sender(sock_data);
     if(ret == 2) {
       printf("Failed to generate sender data.\n");
-    }
-    if(ret == 1) {
+    } else if(ret == 1) {
       printf("[SENDER FD: %d]Failed to send data.\n", sock_data);
     }
     printf("[SENDER FD: %d]Successfully sent data to SENDER.\n", sock_data);
   }
-  else if(strcmp(recv_buf, "RECEIVER")==0) {
+  else if(strncmp(recv_buf, ROLE_RECEIVER, strlen(ROLE_RECEIVER))==0) {
     int ret = communication_receiver(sock_data);
     if(ret == 1) {
       printf("[RECEIVER FD: %d]Failed to receive data.\n", sock_data);
@@ -170,7 +171,7 @@ void *handle_client(void *arg) {
     printf("[RECEIVER FD: %d]Successfully receive data from RECEIVER.\n", sock_data);
   }
   else {
-    printf("[Client FD: %d]Unknown role received: %s.\n\n", sock_data, recv_buf);
+    printf("[Client FD: %d]Unknown role received: %s\n\n", sock_data, recv_buf);
     close(sock_data);
     pthread_exit(NULL);
   }
