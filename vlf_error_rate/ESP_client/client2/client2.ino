@@ -13,14 +13,7 @@ void setup() {
 
   connect_to_WiFi();
 
-#ifdef ROLE_SENDER
-  Serial.println("Running as SENDER");
-  comm_as_sender(client);
-#endif
-#ifdef ROLE_RECEIVER
-  Serial.println("Running as RECEIVER");
-  comm_as_receiver(client);
-#endif
+  handle_communication(client);
 
 }
 

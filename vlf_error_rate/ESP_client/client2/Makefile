@@ -16,13 +16,13 @@ endif
 
 PROJECT_DIR = .
 
-ifeq ($(ROLE), SENDER)
-  BUILD_FLAG = -DROLE_SENDER
-else ifeq ($(ROLE), RECEIVER)
-  BUILD_FLAG = -DROLE_RECEIVER
-else
-	$(error Unknown ROLE specified: $(ROLE))
-endif
+# ifeq ($(ROLE), SENDER)
+#   BUILD_FLAG = -DROLE_SENDER
+# else ifeq ($(ROLE), RECEIVER)
+#   BUILD_FLAG = -DROLE_RECEIVER
+# else
+# 	$(error Unknown ROLE specified: $(ROLE))
+# endif
 
 
 # Default Targets
@@ -30,7 +30,7 @@ all: compile upload
 
 # Compile
 compile:
-	arduino-cli compile --fqbn $(FQBN) --build-property "build.extra_flags=$(BUILD_FLAG)" $(PROJECT_DIR)
+	arduino-cli compile --fqbn $(FQBN)  $(PROJECT_DIR)
 
 # Upload
 upload:
