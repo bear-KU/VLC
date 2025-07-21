@@ -26,15 +26,15 @@ inline void connect_to_WiFi() {
   Serial.print("Connecting to WiFi");
 
   int attempts = 0;
-  while(WiFi.status() != WL_CONNECTED && attempts < 20) {
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
     delay(500);
     Serial.print(".");
     attempts++;
   }
-  
-  if(WiFi.status() != WL_CONNECTED) {
+
+  if (WiFi.status() != WL_CONNECTED) {
     Serial.println("\nFailed to connect to Wi-Fi");
-    while(1); // Stay in a loop if WiFi connection fails
+    while (1); // Stay in a loop if WiFi connection fails
   }
   Serial.println("\nWi-Fi connected!");
   Serial.print("IP address: ");

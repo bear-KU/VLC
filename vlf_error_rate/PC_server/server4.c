@@ -56,7 +56,7 @@ int main(int argc, char* argv[]) {
 
   // 待受ソケット
   sock_listen = socket(sa.sin_family, SOCK_STREAM, 0);
-  if(sock_listen == -1) {
+  if (sock_listen == -1) {
     printf("Failed to create socket_listen.\n");
     return 1;
   }
@@ -65,23 +65,23 @@ int main(int argc, char* argv[]) {
   setsockopt(sock_listen, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
 
   // bind
-  if(bind(sock_listen, (struct sockaddr *)&sa, sizeof(sa)) == -1) {
+  if (bind(sock_listen, (struct sockaddr *)&sa, sizeof(sa)) == -1) {
     printf("Failed to bind socket_listen.\n");
     return 1;
   }
 
   // listen
-  if(listen(sock_listen, MAX_CONCURRENT_CONNECTIONS) == -1) {
+  if (listen(sock_listen, MAX_CONCURRENT_CONNECTIONS) == -1) {
     printf("Failed to listen on socket_listen.\n");
     return 1;
   }
 
   // 入力部分
   printf("Server is listening on %s:%s\n", "192.168.1.49", "61001");
-  while(1) {
+  while (1) {
     printf("Enter 1 to continue or 0 to shutdown the server: ");
     scanf("%d", &opt);
-    if(!opt) {
+    if (!opt) {
       break; // Exit the loop to shutdown the server
     }
     printf("Enter the chunk size: ");
@@ -104,15 +104,15 @@ int main(int argc, char* argv[]) {
       }
 
       info->sock_data = accept(sock_listen, NULL, NULL);
-      if(info->sock_data == -1) {
+      if (info->sock_data == -1) {
         printf("Failed to accept connection.\n");
         free(info);
-        if(errno == EINTR) continue;
+        if (errno == EINTR) continue;
         return 1; // Exit on error
       }
 
       // 接続した順番に応じて ROLE を設定
-      if(i == 0){
+      if (i == 0) {
         strcpy(info->role, ROLE_RECEIVER);
       } else {
         strcpy(info->role, ROLE_SENDER);
@@ -151,7 +151,7 @@ void *handle_client(void *arg) {
   char recv_role[ROLE_SIZE];
 
   // クライアントに ROLE を送信
-  if(send(sock_data, role, strlen(role), 0) < 0) {
+  if (send(sock_data, role, strlen(role), 0) < 0) {
     printf("[Client FD: %d]Failed to send role.\n", sock_data);
     close(sock_data);
     free(info);
@@ -162,13 +162,12 @@ void *handle_client(void *arg) {
   // 役割を取得
   memset(recv_role, 0, sizeof(recv_role));
   received_len = recv(sock_data, recv_role, sizeof(recv_role), 0);
-  if(received_len < 0) {
+  if (received_len < 0) {
     printf("[Client FD: %d]Failed to receive data.\n\n", sock_data);
     close(sock_data);
     free(info);
     pthread_exit(NULL);
-  }
-  else if(received_len == 0) {
+  } else if (received_len == 0) {
     printf("[Client FD: %d]Client disconnected.\n\n", sock_data);
     close(sock_data);
     free(info);
@@ -178,21 +177,19 @@ void *handle_client(void *arg) {
   printf("[Client FD: %d]Received role: %s\n", sock_data, recv_role);
 
   // SENDER または RECEIVER の役割を確認
-  if(strncmp(recv_role, ROLE_SENDER, strlen(recv_role))==0) {
+  if (strncmp(recv_role, ROLE_SENDER, strlen(recv_role)) == 0) {
     int ret = communication_sender(sock_data);
-    if(ret != 0) {
+    if (ret != 0) {
       printf("[SENDER FD: %d]Communication failed.\n", sock_data);
     }
     printf("[SENDER FD: %d]Successfully sent data to SENDER.\n", sock_data);
-  }
-  else if(strncmp(recv_role, ROLE_RECEIVER, strlen(recv_role))==0) {
+  } else if (strncmp(recv_role, ROLE_RECEIVER, strlen(recv_role)) == 0) {
     int ret = communication_receiver(sock_data);
-    if(ret != 0) {
+    if (ret != 0) {
       printf("[RECEIVER FD: %d]Communication failed\n", sock_data);
     }
     printf("[RECEIVER FD: %d]Successfully receive data from RECEIVER.\n", sock_data);
-  }
-  else {
+  } else {
     printf("[Client FD: %d]Unknown role received: %s\n\n", sock_data, recv_role);
     close(sock_data);
     pthread_exit(NULL);
@@ -217,13 +214,13 @@ int communication_sender(int sock_data) {
 
   memset(json_string, 0, sizeof(json_string));
   ret = generate_sender_data(json_string, sender_data);
-  if(ret != 0) {
+  if (ret != 0) {
     return 2;
   }
 
   pthread_mutex_lock(&data_mutex);
 
-  if(send(sock_data, json_string, strlen(json_string), 0) < 0) {
+  if (send(sock_data, json_string, strlen(json_string), 0) < 0) {
     pthread_mutex_unlock(&data_mutex);
     return 1;
   }
@@ -238,10 +235,9 @@ int communication_receiver(int sock_data) {
 
   memset(temp_buf, 0, sizeof(temp_buf));
   received_len = recv(sock_data, temp_buf, sizeof(temp_buf) - 1, 0);
-  if(received_len < 0) {
+  if (received_len < 0) {
     return 1;
-  }
-  else if(received_len == 0) {
+  } else if (received_len == 0) {
     return 2;
   }
   temp_buf[received_len] = '\0';
@@ -257,7 +253,7 @@ int communication_receiver(int sock_data) {
 
 int generate_sender_data(char *json_string, char *sender_data) {
   cJSON *root = cJSON_CreateObject();
-  if(root == NULL) {
+  if (root == NULL) {
     printf("Failed to create JSON object.\n");
     return 1;
   }
@@ -267,7 +263,7 @@ int generate_sender_data(char *json_string, char *sender_data) {
   cJSON_AddStringToObject(root, "chunk_size", chunk_size);
   cJSON_AddStringToObject(root, "signal_len", signal_len);
 
-  if(!cJSON_PrintPreallocated(root, json_string, SENDER_JSON_SIZE, 0)) {
+  if (!cJSON_PrintPreallocated(root, json_string, SENDER_JSON_SIZE, 0)) {
     printf("Failed to print JSON object.\n");
     cJSON_Delete(root);
     return 1;
@@ -278,7 +274,7 @@ int generate_sender_data(char *json_string, char *sender_data) {
 }
 
 void generate_random_binary_data(char *buf, size_t size) {
-  for(size_t i = 0; i < size; i++) {
+  for (size_t i = 0; i < size; i++) {
     buf[i] = (rand() % 2) == 0 ? '0' : '1'; // int ではなく char
   }
   buf[size] = '\0';
@@ -286,12 +282,12 @@ void generate_random_binary_data(char *buf, size_t size) {
 
 char binary_to_hex_char(char *binary) {
   int value = 0;
-  if(binary[0] == '1') value += 8;
-  if(binary[1] == '1') value += 4;
-  if(binary[2] == '1') value += 2;
-  if(binary[3] == '1') value += 1;
+  if (binary[0] == '1') value += 8;
+  if (binary[1] == '1') value += 4;
+  if (binary[2] == '1') value += 2;
+  if (binary[3] == '1') value += 1;
 
-  if(value < 10) {
+  if (value < 10) {
     return '0' + value; // 数字の場合
   } else {
     return 'A' + (value - 10); // A-F の場合

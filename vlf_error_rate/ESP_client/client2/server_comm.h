@@ -16,7 +16,7 @@ inline void connect_to_server(WiFiClient &client) {
   // 接続
   if (!client.connect(serverIP, serverPort)) {
     Serial.println("\nFailed to connect to server.");
-    while(1); // Stay in a loop if connection fails
+    while (1); // Stay in a loop if connection fails
   }
   Serial.println("Connected to server.");
 }
@@ -47,10 +47,10 @@ inline void handle_communication(WiFiClient &client) {
   role.trim();
   
   // 役割に応じた処理
-  if(role.equals("SENDER")) {
+  if (role.equals("SENDER")) {
     Serial.println("Running as SENDER");
     comm_as_sender(client, role);
-  } else if(role.equals("RECEIVER")) {
+  } else if (role.equals("RECEIVER")) {
     Serial.println("Running as RECEIVER");
     comm_as_receiver(client, role);
   } else {
@@ -86,8 +86,6 @@ inline void comm_as_sender(WiFiClient &client, String &role) {
   sender_buf[sizeof(sender_buf) - 1] = '\0';
   Serial.print("Received from server: ");
   Serial.println(sender_buf);  
-
-
 }
 
 // RECEIVER としての通信処理
