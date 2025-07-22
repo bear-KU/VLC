@@ -11,7 +11,9 @@ inline void disconnect_from_server(WiFiClient &client);
 inline void handle_communication(WiFiClient &client);
 inline void comm_as_sender(WiFiClient &client, String &role);
 inline void comm_as_receiver(WiFiClient &client, String &role);
-inline void set_condition(WiFiClient &client);
+inline void set_condition(WiFiClient &client, int &data_type, int &payload_size, int &signal_len);
+inline void set_role(WiFiClient &client, char *role);
+inline void comm_report(WiFiClient client, char *role, char *vlc_data);
 
 // サーバとの接続を確立
 inline void connect_to_server(WiFiClient &client) {
@@ -35,37 +37,48 @@ inline void handle_communication(WiFiClient &client) {
   connect_to_server(client);
 
   // 通信条件の設定
-  set_condition(client);
+  int data_type, payload_size, signal_len;
+  set_condition(client, data_type, payload_size, signal_len);
+
+  // send / receive の役割の設定
+  char role[ROLE_SIZE];
+  set_role(client, role);
+
+  // 可視光通信の役割に応じた処理
+
+  // 可視光通信の実験結果に関する通信
+  char vlc_data[HEX_DATA_BUFFER_SIZE + 1] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  comm_report(client, role, vlc_data);
 
   // 一旦待つ
-  while (1) ;
+  // while (1) ;
 
-  // ROLE の取得
-  String role;
-  unsigned long timeout = millis();
-  while (!client.available()) {
-    if (millis() - timeout > 5000) {
-      Serial.println("No response from server.");
-      disconnect_from_server(client);
-      return;
-    }
-    delay(10);
-  }
-  role = client.readStringUntil('\n');
-  role.trim();
+  // // ROLE の取得
+  // String role;
+  // unsigned long timeout = millis();
+  // while (!client.available()) {
+  //   if (millis() - timeout > 5000) {
+  //     Serial.println("No response from server.");
+  //     disconnect_from_server(client);
+  //     return;
+  //   }
+  //   delay(10);
+  // }
+  // role = client.readStringUntil('\n');
+  // role.trim();
   
-  // 役割に応じた処理
-  if (role.equals("SENDER")) {
-    Serial.println("Running as SENDER");
-    comm_as_sender(client, role);
-  } else if (role.equals("RECEIVER")) {
-    Serial.println("Running as RECEIVER");
-    comm_as_receiver(client, role);
-  } else {
-    Serial.println("Unknown role received from server.");
-    disconnect_from_server(client);
-    return;
-  }
+  // // 役割に応じた処理
+  // if (role.equals("SENDER")) {
+  //   Serial.println("Running as SENDER");
+  //   comm_as_sender(client, role);
+  // } else if (role.equals("RECEIVER")) {
+  //   Serial.println("Running as RECEIVER");
+  //   comm_as_receiver(client, role);
+  // } else {
+  //   Serial.println("Unknown role received from server.");
+  //   disconnect_from_server(client);
+  //   return;
+  // }
 
   // 通信終了
   disconnect_from_server(client);
@@ -111,7 +124,12 @@ inline void comm_as_receiver(WiFiClient &client, String &role) {
   Serial.println(receiver_buf);
 }
 
-inline void set_condition(WiFiClient &client) {
+
+
+
+// 実験条件の送受信に関する処理
+// TODO: failure を メッセージとして返す
+inline void set_condition(WiFiClient &client, int &data_type, int &payload_size, int &signal_len) {
   unsigned long timeout = millis();
   while (!client.available()) {
     if (millis() - timeout > 5000) {
@@ -154,9 +172,9 @@ inline void set_condition(WiFiClient &client) {
     return;
   }
 
-  int data_type = data["data_type"];
-  int payload_size = data["payload_size"];
-  int signal_len = data["signal_len"];
+  data_type = data["data_type"];
+  payload_size = data["payload_size"];
+  signal_len = data["signal_len"];
 
   Serial.print("command: ");
   Serial.println(command);
@@ -172,6 +190,146 @@ inline void set_condition(WiFiClient &client) {
   res_doc["command"] = command;
   res_doc["status"] = "success";
   res_doc["data"] = ""; // 空のデータ
+
+  String response;
+  serializeJson(res_doc, response);
+  client.println(response);
+  Serial.print("Sent response to server: ");
+  Serial.println(response);
+}
+
+
+// 可視光通信の役割に関する処理
+// TODO: failure を メッセージとして返す
+inline void set_role(WiFiClient &client, char *role) {
+  unsigned long timeout = millis();
+  while (!client.available()) {
+    if (millis() - timeout > 5000) {
+      Serial.println("No response from server.");
+      disconnect_from_server(client);
+      return;
+    }
+    delay(10);
+  }
+
+  // set_condition(json) をサーバから受信
+  String json_string = client.readStringUntil('\n');
+  json_string.trim();
+  Serial.print("Received JSON from server: ");
+  Serial.println(json_string);
+
+  // JSONをパース
+  StaticJsonDocument<256> doc;
+  DeserializationError error = deserializeJson(doc, json_string);
+  if (error) {
+    Serial.print("Failed to parse JSON: ");
+    Serial.println(error.c_str());
+    disconnect_from_server(client);
+    return;
+  }
+
+  // JSONからデータを取得
+  const char* command = doc["command"];
+  if (strcmp(command, "receive") != 0 && strcmp(command, "send") != 0) {
+    Serial.println("Invalid command received from server.");
+    disconnect_from_server(client);
+    return;
+  }
+  strncpy(role, command, ROLE_SIZE - 1);
+  role[ROLE_SIZE - 1] = '\0';
+
+
+  // json形式の"data"から実験条件を取得
+  JsonObject data = doc["data"];
+  if (data.isNull()) {
+    Serial.println("No data found in JSON.");
+    disconnect_from_server(client);
+    return;
+  }
+
+  int id = data["id"];
+
+  Serial.print("command: ");
+  Serial.println(command);
+  Serial.print("id: ");
+  Serial.println(id);
+
+  // 応答をサーバに送信
+  StaticJsonDocument<256> res_doc;
+  res_doc["command"] = command;
+  res_doc["status"] = "success";
+  res_doc["data"] = ""; // 空のデータ
+
+  String response;
+  serializeJson(res_doc, response);
+  client.println(response);
+  Serial.print("Sent response to server: ");
+  Serial.println(response);
+}
+
+inline void comm_report(WiFiClient client, char *role, char *vlc_data) {
+  unsigned long timeout = millis();
+  while (!client.available()) {
+    if (millis() - timeout > 5000) {
+      Serial.println("No response from server.");
+      disconnect_from_server(client);
+      return;
+    }
+    delay(10);
+  }
+
+  // set_condition(json) をサーバから受信
+  String json_string = client.readStringUntil('\n');
+  json_string.trim();
+  Serial.print("Received JSON from server: ");
+  Serial.println(json_string);
+
+  // JSONをパース
+  StaticJsonDocument<256> doc;
+  DeserializationError error = deserializeJson(doc, json_string);
+  if (error) {
+    Serial.print("Failed to parse JSON: ");
+    Serial.println(error.c_str());
+    disconnect_from_server(client);
+    return;
+  }
+
+  // JSONからデータを取得
+  const char* command = doc["command"];
+  if (strcmp(command, "report") != 0) {
+    Serial.println("Invalid command received from server.");
+    disconnect_from_server(client);
+    return;
+  }
+  strncpy(role, command, ROLE_SIZE - 1);
+  role[ROLE_SIZE - 1] = '\0';
+
+
+  // json形式の"data"から実験条件を取得
+  JsonObject data = doc["data"];
+  if (data.isNull()) {
+    Serial.println("No data found in JSON.");
+    disconnect_from_server(client);
+    return;
+  }
+
+  int id = data["id"];
+
+  Serial.print("command: ");
+  Serial.println(command);
+  Serial.print("id: ");
+  Serial.println(id);
+
+  // 応答をサーバに送信
+  StaticJsonDocument<512> res_data_doc;
+  res_data_doc["role"] = role;
+  res_data_doc["id"] = id;
+  res_data_doc["data"] = vlc_data; // 受信したデータ
+
+  StaticJsonDocument<512> res_doc;
+  res_doc["command"] = command;
+  res_doc["status"] = "success";
+  res_doc["data"] = res_data_doc;
 
   String response;
   serializeJson(res_doc, response);

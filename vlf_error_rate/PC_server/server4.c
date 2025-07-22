@@ -34,6 +34,9 @@ int generate_sender_data(char *json_string, char *sender_data);
 char binary_to_hex_char(char *binary);
 void binary_to_hex_string(char *binary_buf, char *hex_buf);
 int comm_set_condition(int sock, int data_type, int payload_size, int signal_len);
+int comm_assign_vlc_task(int sock, const char *vlc_command, int message_id);
+ssize_t recv_line(int sock, char *buf, size_t size);
+int comm_report(int sock, int message_id, char *vlc_data);
 
 char sender_data[HEX_DATA_BUFFER_SIZE+1];
 char receiver_data[HEX_DATA_BUFFER_SIZE+1];
@@ -152,20 +155,20 @@ int main(int argc, char* argv[]) {
 
 // クライアントからの接続を処理する関数
 void *handle_client(void *arg) {
-  ssize_t received_len;
+  // ssize_t received_len;
   client_info *info = (client_info *)arg;
   int sock_data = info->sock_data;
   char *role = info->role;
-  char recv_role[ROLE_SIZE];
+  // char recv_role[ROLE_SIZE];
 
   // ESP32に実験条件を送信
-  int set_condition = comm_set_condition(sock_data, data_type, chunk_size, signal_len);
-  if (set_condition == 1) {
+  int ret_set_condition = comm_set_condition(sock_data, data_type, chunk_size, signal_len);
+  if (ret_set_condition == 1) {
     printf("[Client FD: %d]Failed to set condition.\n", sock_data);
     close(sock_data);
     free(info);
     pthread_exit(NULL);
-  } else if (set_condition == -1) {
+  } else if (ret_set_condition == -1) {
     printf("[Client FD: %d]Status is not success.\n", sock_data);
     close(sock_data);
     free(info);
@@ -174,7 +177,48 @@ void *handle_client(void *arg) {
     printf("[Client FD: %d]Successfully set condition.\n", sock_data);
   }
 
-  while (1) ;
+  // 可視光通信における役割(send/receive)を決定
+  char vlc_command[ROLE_SIZE] = {0};
+  if (strcmp(role, ROLE_RECEIVER) == 0) {
+    strncpy(vlc_command, "receive", ROLE_SIZE - 1);
+  } else if (strcmp(role, ROLE_SENDER) == 0) {
+    strncpy(vlc_command, "send", ROLE_SIZE - 1);
+  } else {
+    printf("Unknown role: %s\n", role);
+    close(sock_data);
+    free(info);
+    pthread_exit(NULL);
+  }
+
+  int ret_vlc_assign = comm_assign_vlc_task(sock_data, vlc_command, 0);
+  if (ret_vlc_assign == 1) {
+    printf("[Client FD: %d]Failed to set condition.\n", sock_data);
+    close(sock_data);
+    free(info);
+    pthread_exit(NULL);
+  } else if (ret_vlc_assign == -1) {
+    printf("[Client FD: %d]Status is not success.\n", sock_data);
+    close(sock_data);
+    free(info);
+    pthread_exit(NULL);
+  } else {
+    printf("[Client FD: %d]Successfully set condition.\n", sock_data);
+  }
+
+  // クライアントからデータを受信
+  if (strcmp(role, ROLE_RECEIVER) == 0) {
+    comm_report(sock_data, 0, receiver_data);
+  } else if (strcmp(role, ROLE_SENDER) == 0) {
+    comm_report(sock_data, 0, sender_data);
+  } else {
+    printf("Unknown role: %s\n", role);
+    close(sock_data);
+    free(info);
+    pthread_exit(NULL);
+  }
+
+
+  // while (1) ;
 
 
   // for (int message_id = 0; message_id < 10; message_id++) {
@@ -188,50 +232,50 @@ void *handle_client(void *arg) {
   // }
 
 
-  // クライアントに ROLE を送信
-  if (send(sock_data, role, strlen(role), 0) < 0) {
-    printf("[Client FD: %d]Failed to send role.\n", sock_data);
-    close(sock_data);
-    free(info);
-    pthread_exit(NULL);
-  }
-  printf("[Client FD: %d]Sent role: %s\n", sock_data, role);
+  // // クライアントに ROLE を送信
+  // if (send(sock_data, role, strlen(role), 0) < 0) {
+  //   printf("[Client FD: %d]Failed to send role.\n", sock_data);
+  //   close(sock_data);
+  //   free(info);
+  //   pthread_exit(NULL);
+  // }
+  // printf("[Client FD: %d]Sent role: %s\n", sock_data, role);
 
-  // 役割を取得
-  memset(recv_role, 0, sizeof(recv_role));
-  received_len = recv(sock_data, recv_role, sizeof(recv_role), 0);
-  if (received_len < 0) {
-    printf("[Client FD: %d]Failed to receive data.\n\n", sock_data);
-    close(sock_data);
-    free(info);
-    pthread_exit(NULL);
-  } else if (received_len == 0) {
-    printf("[Client FD: %d]Client disconnected.\n\n", sock_data);
-    close(sock_data);
-    free(info);
-    pthread_exit(NULL);
-  }
-  recv_role[received_len] = '\0';
-  printf("[Client FD: %d]Received role: %s\n", sock_data, recv_role);
+  // // 役割を取得
+  // memset(recv_role, 0, sizeof(recv_role));
+  // received_len = recv(sock_data, recv_role, sizeof(recv_role), 0);
+  // if (received_len < 0) {
+  //   printf("[Client FD: %d]Failed to receive data.\n\n", sock_data);
+  //   close(sock_data);
+  //   free(info);
+  //   pthread_exit(NULL);
+  // } else if (received_len == 0) {
+  //   printf("[Client FD: %d]Client disconnected.\n\n", sock_data);
+  //   close(sock_data);
+  //   free(info);
+  //   pthread_exit(NULL);
+  // }
+  // recv_role[received_len] = '\0';
+  // printf("[Client FD: %d]Received role: %s\n", sock_data, recv_role);
 
-  // SENDER または RECEIVER の役割を確認
-  if (strncmp(recv_role, ROLE_SENDER, strlen(recv_role)) == 0) {
-    int ret = communication_sender(sock_data);
-    if (ret != 0) {
-      printf("[SENDER FD: %d]Communication failed.\n", sock_data);
-    }
-    printf("[SENDER FD: %d]Successfully sent data to SENDER.\n", sock_data);
-  } else if (strncmp(recv_role, ROLE_RECEIVER, strlen(recv_role)) == 0) {
-    int ret = communication_receiver(sock_data);
-    if (ret != 0) {
-      printf("[RECEIVER FD: %d]Communication failed\n", sock_data);
-    }
-    printf("[RECEIVER FD: %d]Successfully receive data from RECEIVER.\n", sock_data);
-  } else {
-    printf("[Client FD: %d]Unknown role received: %s\n\n", sock_data, recv_role);
-    close(sock_data);
-    pthread_exit(NULL);
-  }
+  // // SENDER または RECEIVER の役割を確認
+  // if (strncmp(recv_role, ROLE_SENDER, strlen(recv_role)) == 0) {
+  //   int ret = communication_sender(sock_data);
+  //   if (ret != 0) {
+  //     printf("[SENDER FD: %d]Communication failed.\n", sock_data);
+  //   }
+  //   printf("[SENDER FD: %d]Successfully sent data to SENDER.\n", sock_data);
+  // } else if (strncmp(recv_role, ROLE_RECEIVER, strlen(recv_role)) == 0) {
+  //   int ret = communication_receiver(sock_data);
+  //   if (ret != 0) {
+  //     printf("[RECEIVER FD: %d]Communication failed\n", sock_data);
+  //   }
+  //   printf("[RECEIVER FD: %d]Successfully receive data from RECEIVER.\n", sock_data);
+  // } else {
+  //   printf("[Client FD: %d]Unknown role received: %s\n\n", sock_data, recv_role);
+  //   close(sock_data);
+  //   pthread_exit(NULL);
+  // }
 
   printf("[Client FD: %d]Connection closed.\n\n", sock_data);
   close(sock_data);
@@ -311,6 +355,32 @@ int generate_sender_data(char *json_string, char *sender_data) {
   return 0;
 }
 
+// 指定されたソケットから、改行文字('\n')までを1行として読み込む関数
+ssize_t recv_line(int sock, char *buf, size_t size) {
+    ssize_t total_read = 0;
+    char ch;
+    ssize_t n;
+
+    while (total_read < size - 1) {
+        n = recv(sock, &ch, 1, 0); // 1バイトずつ受信
+        if (n > 0) {
+            if (ch == '\n') {
+                break; // 改行が来たらループを抜ける
+            }
+            buf[total_read++] = ch;
+        } else if (n == 0) {
+            // クライアントが接続を切ったが、まだ改行が来ていない
+            if (total_read == 0) return 0; // 何も読めてなければ0を返す
+            else break; // 途中まで読めていれば、そこまでを返す
+        } else {
+            // エラー
+            return -1;
+        }
+    }
+    buf[total_read] = '\0'; // 文字列の終端
+    return total_read;
+}
+
 void generate_random_binary_data(char *buf, size_t size) {
   for (size_t i = 0; i < size; i++) {
     buf[i] = (rand() % 2) == 0 ? '0' : '1'; // int ではなく char
@@ -353,31 +423,6 @@ void binary_to_hex_string(char *binary_buf, char *hex_buf) {
   hex_buf[hex_index] = '\0';
 }
 
-// int generate_command_json(char *json_string, char *command) {
-//   cJSON *root = cJSON_CreateObject();
-//   if (root == NULL) {
-//     printf("Failed to create JSON object.\n");
-//     return 1;
-//   }
-
-//   char *data = "Sample data"; // Placeholder for actual data
-
-
-
-//   // Add data to the JSON object
-//   cJSON_AddStringToObject(root, "command", command);
-//   cJSON_AddStringToObject(root, "data", data);
-
-//   if (!cJSON_PrintPreallocated(root, json_string, SENDER_JSON_SIZE, 0)) {
-//     printf("Failed to print JSON object.\n");
-//     cJSON_Delete(root);
-//     return 1;
-//   }
-
-//   cJSON_Delete(root);
-//   return 0;
-// }
-
 
 int comm_set_condition(int sock, int data_type, int payload_size, int signal_len) {
   cJSON *root = cJSON_CreateObject();
@@ -402,12 +447,92 @@ int comm_set_condition(int sock, int data_type, int payload_size, int signal_len
   cJSON_AddStringToObject(root, "command", "set_condition");
   cJSON_AddItemToObject(root, "data", data_obj);
 
-  // if (!cJSON_PrintPreallocated(root, json_string, SENDER_JSON_SIZE, 0)) {
-  //   printf("Failed to print JSON object.\n");
-  //   cJSON_Delete(root);
-  //   return 1;
-  // }
+  // データを送信
+  // char *json_string = cJSON_Print(root);
+  char *json_string = cJSON_PrintUnformatted(root);
+  if (json_string == NULL) {
+    printf("Failed to print JSON object to string.\n");
+    cJSON_Delete(root);
+    return 1;
+  }
 
+  if (send(sock, json_string, strlen(json_string), 0) < 0) {
+    printf("Failed to send JSON message.\n");
+    free(json_string);
+    cJSON_Delete(root);
+    return 1;
+  }
+  printf("Sent JSON message: %s\n", json_string);
+
+  // 不要なデータをメモリから解放
+  cJSON_Delete(root);
+  free(json_string);
+
+  
+
+  // クライアントからの応答を受信
+  char response[100];
+  ssize_t response_len = recv_line(sock, response, sizeof(response));
+
+  if (response_len < 0) {
+    printf("Failed to receive response from client.\n");
+    return 1;
+  } else if (response_len == 0) {
+    printf("Client disconnected before sending response.\n");
+    return 1;
+  }
+  response[response_len] = '\0';
+  printf("Received response from client: %s\n", response);
+
+
+  // json形式の受信データをparse
+  cJSON *response_json = cJSON_Parse(response);
+  if (response_json == NULL) {
+    printf("Failed to parse JSON response: %s\n", cJSON_GetErrorPtr());
+    return 1;
+  }
+
+
+  // 受信データの確認
+  cJSON *res_command = cJSON_GetObjectItem(response_json, "command");
+  if (res_command == NULL || strcmp(res_command->valuestring, "set_condition") != 0) {
+    printf("Invalid response format: 'command' not found or not 'set_condition'.\n");
+    cJSON_Delete(response_json);
+    return 1;
+  }
+
+  cJSON *res_status = cJSON_GetObjectItem(response_json, "status");
+  if (res_status == NULL || strcmp(res_status->valuestring, "success") != 0) {
+    printf("Failed to set condition. Status: %s\n", res_status ? res_status->valuestring : "unknown");
+    cJSON_Delete(response_json);
+    return -1;
+  }
+  printf("Response status: %s\n", res_status->valuestring);
+
+  cJSON_Delete(response_json);
+  return 0;
+}
+
+int comm_assign_vlc_task(int sock, const char *vlc_command, int message_id) {
+  cJSON *root = cJSON_CreateObject();
+  if (root == NULL) {
+    printf("Failed to create JSON message object.\n");
+    return 1;
+  }
+
+  cJSON *data_obj = cJSON_CreateObject();
+  if (data_obj == NULL) {
+    printf("Failed to create JSON data object.\n");
+    cJSON_Delete(root);
+    return 1;
+  }
+
+  // Add vlc message_id to the data_obj
+  cJSON_AddNumberToObject(data_obj, "id", message_id);
+
+  // Add command and data to the JSON object
+  cJSON_AddStringToObject(root, "command", vlc_command);
+  cJSON_AddItemToObject(root, "data", data_obj);
 
   // データを送信
   // char *json_string = cJSON_Print(root);
@@ -426,20 +551,18 @@ int comm_set_condition(int sock, int data_type, int payload_size, int signal_len
   }
   printf("Sent JSON message: %s\n", json_string);
 
+  // 不要なデータをメモリから解放
+  cJSON_Delete(root);
+  free(json_string);
 
   // クライアントからの応答を受信
   char response[100];
-  ssize_t response_len = recv(sock, response, sizeof(response) - 1, 0);
-
+  ssize_t response_len = recv_line(sock, response, sizeof(response));
   if (response_len < 0) {
     printf("Failed to receive response from client.\n");
-    free(json_string);
-    cJSON_Delete(root);
     return 1;
   } else if (response_len == 0) {
     printf("Client disconnected before sending response.\n");
-    free(json_string);
-    cJSON_Delete(root);
     return 1;
   }
   response[response_len] = '\0';
@@ -450,19 +573,15 @@ int comm_set_condition(int sock, int data_type, int payload_size, int signal_len
   cJSON *response_json = cJSON_Parse(response);
   if (response_json == NULL) {
     printf("Failed to parse JSON response: %s\n", cJSON_GetErrorPtr());
-    free(json_string);
-    cJSON_Delete(root);
     return 1;
   }
 
 
   // 受信データの確認
   cJSON *res_command = cJSON_GetObjectItem(response_json, "command");
-  if (res_command == NULL || strcmp(res_command->valuestring, "set_condition") != 0) {
-    printf("Invalid response format: 'command' not found or not 'set_condition'.\n");
+  if (res_command == NULL || strcmp(res_command->valuestring, vlc_command) != 0) {
+    printf("Invalid response format: 'command' not found or not '%s'.\n", vlc_command);
     cJSON_Delete(response_json);
-    free(json_string);
-    cJSON_Delete(root);
     return 1;
   }
 
@@ -470,22 +589,145 @@ int comm_set_condition(int sock, int data_type, int payload_size, int signal_len
   if (res_status == NULL || strcmp(res_status->valuestring, "success") != 0) {
     printf("Failed to set condition. Status: %s\n", res_status ? res_status->valuestring : "unknown");
     cJSON_Delete(response_json);
-    free(json_string);
-    cJSON_Delete(root);
     return -1;
   }
   printf("Response status: %s\n", res_status->valuestring);
 
   cJSON_Delete(response_json);
-  free(json_string);
-  cJSON_Delete(root);
   return 0;
+
 }
 
-// int comm_assign_vlc_task(sock, role, message_id) {
 
-// }
+int comm_report(int sock, int message_id, char *vlc_data) {
+  cJSON *root = cJSON_CreateObject();
+  if (root == NULL) {
+    printf("Failed to create JSON message object.\n");
+    return 1;
+  }
 
-// int comm_report(sock, message_id) {
+  cJSON *data_obj = cJSON_CreateObject();
+  if (data_obj == NULL) {
+    printf("Failed to create JSON data object.\n");
+    cJSON_Delete(root);
+    return 1;
+  }
 
-// }
+  // Add vlc message_id to the data_obj
+  cJSON_AddNumberToObject(data_obj, "id", message_id);
+
+  // Add command and data to the JSON object
+  cJSON_AddStringToObject(root, "command", "report");
+  cJSON_AddItemToObject(root, "data", data_obj);
+
+  // データを送信
+  // char *json_string = cJSON_Print(root);
+  char *json_string = cJSON_PrintUnformatted(root);
+  if (json_string == NULL) {
+    printf("Failed to print JSON object to string.\n");
+    cJSON_Delete(root);
+    return 1;
+  }
+
+  if (send(sock, json_string, strlen(json_string), 0) < 0) {
+    printf("Failed to send JSON message.\n");
+    free(json_string);
+    cJSON_Delete(root);
+    return 1;
+  }
+  printf("Sent JSON message: %s\n", json_string);
+
+  // 不要なデータをメモリから削除
+  cJSON_Delete(root);
+  free(json_string);
+
+  // クライアントからの応答を受信
+  char response[512];
+  ssize_t response_len = recv_line(sock, response, sizeof(response));
+
+  if (response_len < 0) {
+    printf("Failed to receive response from client.\n");
+    return 1;
+  } else if (response_len == 0) {
+    printf("Client disconnected before sending response.\n");
+    return 1;
+  }
+  response[response_len] = '\0';
+  printf("Received response from client: %s\n", response);
+
+
+
+
+  // json形式の受信データをparse
+  cJSON *response_json = cJSON_Parse(response);
+  if (response_json == NULL) {
+    printf("Failed to parse JSON response: %s\n", cJSON_GetErrorPtr());
+    return 1;
+  }
+
+
+  // 受信データの確認
+  cJSON *res_command = cJSON_GetObjectItem(response_json, "command");
+  if (res_command == NULL || strcmp(res_command->valuestring, "report") != 0) {
+    printf("Invalid response format: 'command' not found or not 'report'.\n");
+    cJSON_Delete(response_json);
+    return 1;
+  }
+
+  cJSON *res_status = cJSON_GetObjectItem(response_json, "status");
+  if (res_status == NULL || strcmp(res_status->valuestring, "success") != 0) {
+    printf("Failed to set condition. Status: %s\n", res_status ? res_status->valuestring : "unknown");
+    cJSON_Delete(response_json);
+    return -1;
+  }
+  printf("Response status: %s\n", res_status->valuestring);
+
+  cJSON *res_data_obj = cJSON_GetObjectItem(response_json, "data");
+  if (res_data_obj == NULL) {
+    printf("Invalid response format: 'data' not found.\n");
+    cJSON_Delete(response_json);
+    return 1;
+  }
+
+  cJSON *response_data_json = cJSON_Parse(cJSON_PrintUnformatted(res_data_obj));
+  if (response_data_json == NULL) {
+    printf("Failed to parse 'data' JSON object: %s\n", cJSON_GetErrorPtr());
+    cJSON_Delete(response_json);
+    return 1;
+  }
+
+  cJSON *res_role = cJSON_GetObjectItem(response_data_json, "role");
+  if (res_role == NULL) {
+    printf("Invalid response format: 'role' not found in 'data'.\n");
+    cJSON_Delete(response_data_json);
+    cJSON_Delete(response_json);
+    return 1;
+  }
+
+  cJSON *res_id = cJSON_GetObjectItem(response_data_json, "id");
+  if (res_id == NULL) {
+    printf("Invalid response format: 'id' not found in 'data'.\n");
+    cJSON_Delete(response_data_json);
+    cJSON_Delete(response_json);
+    return 1;
+  }
+
+  cJSON *res_data = cJSON_GetObjectItem(response_data_json, "data");
+  if (res_data == NULL) {
+    printf("Invalid response format: 'data' not found in 'data'.\n");
+    cJSON_Delete(response_data_json);
+    cJSON_Delete(response_json);
+    return 1;
+  }
+
+  // 可視光通信のデータを格納
+  pthread_mutex_lock(&data_mutex);
+  memset(vlc_data, 0, HEX_DATA_BUFFER_SIZE + 1);
+  strncpy(vlc_data, res_data->valuestring, HEX_DATA_BUFFER_SIZE);
+  vlc_data[HEX_DATA_BUFFER_SIZE] = '\0';
+  pthread_mutex_unlock(&data_mutex);
+
+  cJSON_Delete(response_data_json);
+  cJSON_Delete(response_json);
+  return 0;
+}
