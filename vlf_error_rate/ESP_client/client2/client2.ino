@@ -33,10 +33,10 @@ inline void connect_to_WiFi() {
   }
 
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("\nFailed to connect to Wi-Fi");
+    Serial.println("Failed to connect to Wi-Fi");
     while (1); // Stay in a loop if WiFi connection fails
   }
-  Serial.println("\nWi-Fi connected!");
+  Serial.println("\r\nWi-Fi connected!");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 }

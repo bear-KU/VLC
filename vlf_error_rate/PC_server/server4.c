@@ -32,12 +32,15 @@ int communication_receiver(int sock_data);
 void generate_random_binary_data(char *buf, size_t size);
 int generate_sender_data(char *json_string, char *sender_data);
 char binary_to_hex_char(char *binary);
-void binary_to_hex_string(char *binary_buf, char *hex_buf) ;
+void binary_to_hex_string(char *binary_buf, char *hex_buf);
+int comm_set_condition(int sock, int data_type, int payload_size, int signal_len);
 
 char sender_data[HEX_DATA_BUFFER_SIZE+1];
 char receiver_data[HEX_DATA_BUFFER_SIZE+1];
-char chunk_size[10];
-char signal_len[10];
+
+int data_type;
+int chunk_size;
+int signal_len;
 
 pthread_mutex_t data_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -76,7 +79,7 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  // 入力部分
+  // パラメータ設定部分
   printf("Server is listening on %s:%s\n", "192.168.1.49", "61001");
   while (1) {
     printf("Enter 1 to continue or 0 to shutdown the server: ");
@@ -84,13 +87,18 @@ int main(int argc, char* argv[]) {
     if (!opt) {
       break; // Exit the loop to shutdown the server
     }
+
+    printf("Enter the data type: ");
+    scanf("%d", &data_type);
+    // TODO: Validate data_type
+    // 0, 1, 2 のいずれかのみ
+
     printf("Enter the chunk size: ");
-    scanf(" %10s", chunk_size);
+    scanf(" %d", &chunk_size);
 
     printf("Enter the signal length: ");
-    scanf(" %10s", signal_len);
+    scanf(" %d", &signal_len);
 
-    
     // Accept a new connection
     printf("Waiting for a connection...\n");
 
@@ -149,6 +157,36 @@ void *handle_client(void *arg) {
   int sock_data = info->sock_data;
   char *role = info->role;
   char recv_role[ROLE_SIZE];
+
+  // ESP32に実験条件を送信
+  int set_condition = comm_set_condition(sock_data, data_type, chunk_size, signal_len);
+  if (set_condition == 1) {
+    printf("[Client FD: %d]Failed to set condition.\n", sock_data);
+    close(sock_data);
+    free(info);
+    pthread_exit(NULL);
+  } else if (set_condition == -1) {
+    printf("[Client FD: %d]Status is not success.\n", sock_data);
+    close(sock_data);
+    free(info);
+    pthread_exit(NULL);
+  } else {
+    printf("[Client FD: %d]Successfully set condition.\n", sock_data);
+  }
+
+  while (1) ;
+
+
+  // for (int message_id = 0; message_id < 10; message_id++) {
+  //   // send or receive を送信
+  //   // コマンド(ESP32の役割)はスレッド作成時の順番 role によって決定される
+  //   comm_assign_vlc_task(sock_data, role, message_id);
+
+  //   // データを受信
+  //   comm_report(sock_data, message_id);
+
+  // }
+
 
   // クライアントに ROLE を送信
   if (send(sock_data, role, strlen(role), 0) < 0) {
@@ -259,9 +297,9 @@ int generate_sender_data(char *json_string, char *sender_data) {
   }
 
   // Add data to the JSON object
-  cJSON_AddStringToObject(root, "data", sender_data);
-  cJSON_AddStringToObject(root, "chunk_size", chunk_size);
-  cJSON_AddStringToObject(root, "signal_len", signal_len);
+  cJSON_AddNumberToObject(root, "data_type", data_type);
+  cJSON_AddNumberToObject(root, "chunk_size", chunk_size);
+  cJSON_AddNumberToObject(root, "signal_len", signal_len);
 
   if (!cJSON_PrintPreallocated(root, json_string, SENDER_JSON_SIZE, 0)) {
     printf("Failed to print JSON object.\n");
@@ -315,7 +353,139 @@ void binary_to_hex_string(char *binary_buf, char *hex_buf) {
   hex_buf[hex_index] = '\0';
 }
 
-// 受信データとの整合性が必要
-// 余りが出た場合0埋されているかわからない
-// 最後がcのとき，1100 となり，1100なのか 110 なのか 11 なのか
-// データの長さは管理される必要がある
+// int generate_command_json(char *json_string, char *command) {
+//   cJSON *root = cJSON_CreateObject();
+//   if (root == NULL) {
+//     printf("Failed to create JSON object.\n");
+//     return 1;
+//   }
+
+//   char *data = "Sample data"; // Placeholder for actual data
+
+
+
+//   // Add data to the JSON object
+//   cJSON_AddStringToObject(root, "command", command);
+//   cJSON_AddStringToObject(root, "data", data);
+
+//   if (!cJSON_PrintPreallocated(root, json_string, SENDER_JSON_SIZE, 0)) {
+//     printf("Failed to print JSON object.\n");
+//     cJSON_Delete(root);
+//     return 1;
+//   }
+
+//   cJSON_Delete(root);
+//   return 0;
+// }
+
+
+int comm_set_condition(int sock, int data_type, int payload_size, int signal_len) {
+  cJSON *root = cJSON_CreateObject();
+  if (root == NULL) {
+    printf("Failed to create JSON message object.\n");
+    return 1;
+  }
+
+  cJSON *data_obj = cJSON_CreateObject();
+  if (data_obj == NULL) {
+    printf("Failed to create JSON data object.\n");
+    cJSON_Delete(root);
+    return 1;
+  }
+
+  // Add vlc parameters to the data_obj
+  cJSON_AddNumberToObject(data_obj, "data_type", data_type);
+  cJSON_AddNumberToObject(data_obj, "payload_size", payload_size);
+  cJSON_AddNumberToObject(data_obj, "signal_len", signal_len);
+
+  // Add command and data to the JSON object
+  cJSON_AddStringToObject(root, "command", "set_condition");
+  cJSON_AddItemToObject(root, "data", data_obj);
+
+  // if (!cJSON_PrintPreallocated(root, json_string, SENDER_JSON_SIZE, 0)) {
+  //   printf("Failed to print JSON object.\n");
+  //   cJSON_Delete(root);
+  //   return 1;
+  // }
+
+
+  // データを送信
+  // char *json_string = cJSON_Print(root);
+  char *json_string = cJSON_PrintUnformatted(root);
+  if (json_string == NULL) {
+    printf("Failed to print JSON object to string.\n");
+    cJSON_Delete(root);
+    return 1;
+  }
+
+  if (send(sock, json_string, strlen(json_string), 0) < 0) {
+    printf("Failed to send JSON message.\n");
+    free(json_string);
+    cJSON_Delete(root);
+    return 1;
+  }
+  printf("Sent JSON message: %s\n", json_string);
+
+
+  // クライアントからの応答を受信
+  char response[100];
+  ssize_t response_len = recv(sock, response, sizeof(response) - 1, 0);
+
+  if (response_len < 0) {
+    printf("Failed to receive response from client.\n");
+    free(json_string);
+    cJSON_Delete(root);
+    return 1;
+  } else if (response_len == 0) {
+    printf("Client disconnected before sending response.\n");
+    free(json_string);
+    cJSON_Delete(root);
+    return 1;
+  }
+  response[response_len] = '\0';
+  printf("Received response from client: %s\n", response);
+
+
+  // json形式の受信データをparse
+  cJSON *response_json = cJSON_Parse(response);
+  if (response_json == NULL) {
+    printf("Failed to parse JSON response: %s\n", cJSON_GetErrorPtr());
+    free(json_string);
+    cJSON_Delete(root);
+    return 1;
+  }
+
+
+  // 受信データの確認
+  cJSON *res_command = cJSON_GetObjectItem(response_json, "command");
+  if (res_command == NULL || strcmp(res_command->valuestring, "set_condition") != 0) {
+    printf("Invalid response format: 'command' not found or not 'set_condition'.\n");
+    cJSON_Delete(response_json);
+    free(json_string);
+    cJSON_Delete(root);
+    return 1;
+  }
+
+  cJSON *res_status = cJSON_GetObjectItem(response_json, "status");
+  if (res_status == NULL || strcmp(res_status->valuestring, "success") != 0) {
+    printf("Failed to set condition. Status: %s\n", res_status ? res_status->valuestring : "unknown");
+    cJSON_Delete(response_json);
+    free(json_string);
+    cJSON_Delete(root);
+    return -1;
+  }
+  printf("Response status: %s\n", res_status->valuestring);
+
+  cJSON_Delete(response_json);
+  free(json_string);
+  cJSON_Delete(root);
+  return 0;
+}
+
+// int comm_assign_vlc_task(sock, role, message_id) {
+
+// }
+
+// int comm_report(sock, message_id) {
+
+// }

@@ -4,12 +4,14 @@
 #include "server_comm.h"
 #include "config.h"
 #include <string.h>
+#include <ArduinoJson.h>
 
 inline void connect_to_server(WiFiClient &client);
 inline void disconnect_from_server(WiFiClient &client);
 inline void handle_communication(WiFiClient &client);
 inline void comm_as_sender(WiFiClient &client, String &role);
 inline void comm_as_receiver(WiFiClient &client, String &role);
+inline void set_condition(WiFiClient &client);
 
 // サーバとの接続を確立
 inline void connect_to_server(WiFiClient &client) {
@@ -31,6 +33,12 @@ inline void disconnect_from_server(WiFiClient &client) {
 inline void handle_communication(WiFiClient &client) {
   // 通信開始
   connect_to_server(client);
+
+  // 通信条件の設定
+  set_condition(client);
+
+  // 一旦待つ
+  while (1) ;
 
   // ROLE の取得
   String role;
@@ -103,4 +111,71 @@ inline void comm_as_receiver(WiFiClient &client, String &role) {
   Serial.println(receiver_buf);
 }
 
+inline void set_condition(WiFiClient &client) {
+  unsigned long timeout = millis();
+  while (!client.available()) {
+    if (millis() - timeout > 5000) {
+      Serial.println("No response from server.");
+      disconnect_from_server(client);
+      return;
+    }
+    delay(10);
+  }
 
+  // set_condition(json) をサーバから受信
+  String json_string = client.readStringUntil('\n');
+  json_string.trim();
+  Serial.print("Received JSON from server: ");
+  Serial.println(json_string);
+
+  // JSONをパース
+  StaticJsonDocument<256> doc;
+  DeserializationError error = deserializeJson(doc, json_string);
+  if (error) {
+    Serial.print("Failed to parse JSON: ");
+    Serial.println(error.c_str());
+    disconnect_from_server(client);
+    return;
+  }
+
+  // JSONからデータを取得
+  const char* command = doc["command"];
+  if (strcmp(command, "set_condition") != 0) {
+    Serial.println("Invalid command received from server.");
+    disconnect_from_server(client);
+    return;
+  }
+
+  // json形式の"data"から実験条件を取得
+  JsonObject data = doc["data"];
+  if (data.isNull()) {
+    Serial.println("No data found in JSON.");
+    disconnect_from_server(client);
+    return;
+  }
+
+  int data_type = data["data_type"];
+  int payload_size = data["payload_size"];
+  int signal_len = data["signal_len"];
+
+  Serial.print("command: ");
+  Serial.println(command);
+  Serial.print("data_type: ");
+  Serial.println(data_type);
+  Serial.print("payload_size: ");
+  Serial.println(payload_size);
+  Serial.print("signal_len: ");
+  Serial.println(signal_len);
+
+  // 応答をサーバに送信
+  StaticJsonDocument<256> res_doc;
+  res_doc["command"] = command;
+  res_doc["status"] = "success";
+  res_doc["data"] = ""; // 空のデータ
+
+  String response;
+  serializeJson(res_doc, response);
+  client.println(response);
+  Serial.print("Sent response to server: ");
+  Serial.println(response);
+}
