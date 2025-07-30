@@ -1,19 +1,47 @@
 #pragma once
+
+#ifndef SERVER_COMM_H
+#define SERVER_COMM_H
+
 #include <WiFi.h>
-
-#include "server_comm.h"
-#include "config.h"
-#include <string.h>
 #include <ArduinoJson.h>
+#include <string.h>
+#include "config.h"
 
+enum SystemState {
+  STATE_IDLE,             // 待機中
+  STATE_SEND_RUNNING,     // 可視光通信 送信中
+  STATE_RECEIVE_RUNNING,  // 可視光通信 受信中
+  STATE_TASK_COMPLETED,   // 可視光通信 タスク完了
+};
+
+// Parameters
+extern int data_type;
+extern int payload_size;
+extern int signal_len;
+// Role for VLC communication
+extern char role[ROLE_SIZE];
+// VLC data
+extern char vlc_data[HEX_DATA_BUFFER_SIZE + 1];
+// System state
+extern SystemState system_state;
+
+// Function Prototypes
 inline void connect_to_server(WiFiClient &client);
 inline void disconnect_from_server(WiFiClient &client);
-inline void handle_communication(WiFiClient &client);
-inline void comm_as_sender(WiFiClient &client, String &role);
-inline void comm_as_receiver(WiFiClient &client, String &role);
-inline void set_condition(WiFiClient &client, int &data_type, int &payload_size, int &signal_len);
-inline void set_role(WiFiClient &client, char *role);
-inline void comm_report(WiFiClient client, char *role, char *vlc_data);
+inline bool handle_json(WiFiClient &client, JsonDocument &doc);
+inline void send_response(WiFiClient &client, JsonDocument &response_doc);
+inline void dispatch_method(WiFiClient &client, JsonDocument &doc);
+inline void set_condition(WiFiClient &client, JsonDocument &request_doc);
+inline void receive(WiFiClient &client, JsonDocument &request_doc);
+inline void send(WiFiClient &client, JsonDocument &request_doc);
+inline void report(WiFiClient &client, JsonDocument &request_doc);
+
+#endif // SERVER_COMM_H
+
+// ============================================================
+// Server Communication Functions
+// ============================================================
 
 // サーバとの接続を確立
 inline void connect_to_server(WiFiClient &client) {
@@ -23,161 +51,98 @@ inline void connect_to_server(WiFiClient &client) {
     while (1); // Stay in a loop if connection fails
   }
   Serial.println("Connected to server.");
-}
+} // inline void connect_to_server(WiFiClient &client)
 
 // サーバとの接続を切断
 inline void disconnect_from_server(WiFiClient &client) {
   client.stop();
   Serial.println("Connection closed.");
-}
-
-// サーバとの処理
-inline void handle_communication(WiFiClient &client) {
-  // 通信開始
-  connect_to_server(client);
-
-  // 通信条件の設定
-  int data_type, payload_size, signal_len;
-  set_condition(client, data_type, payload_size, signal_len);
-
-  // send / receive の役割の設定
-  char role[ROLE_SIZE];
-  set_role(client, role);
-
-  // 可視光通信の役割に応じた処理
-
-  // 可視光通信の実験結果に関する通信
-  char vlc_data[HEX_DATA_BUFFER_SIZE + 1] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  comm_report(client, role, vlc_data);
-
-  // 一旦待つ
-  // while (1) ;
-
-  // // ROLE の取得
-  // String role;
-  // unsigned long timeout = millis();
-  // while (!client.available()) {
-  //   if (millis() - timeout > 5000) {
-  //     Serial.println("No response from server.");
-  //     disconnect_from_server(client);
-  //     return;
-  //   }
-  //   delay(10);
-  // }
-  // role = client.readStringUntil('\n');
-  // role.trim();
-  
-  // // 役割に応じた処理
-  // if (role.equals("SENDER")) {
-  //   Serial.println("Running as SENDER");
-  //   comm_as_sender(client, role);
-  // } else if (role.equals("RECEIVER")) {
-  //   Serial.println("Running as RECEIVER");
-  //   comm_as_receiver(client, role);
-  // } else {
-  //   Serial.println("Unknown role received from server.");
-  //   disconnect_from_server(client);
-  //   return;
-  // }
-
-  // 通信終了
-  disconnect_from_server(client);
-}
+} // inline void disconnect_from_server(WiFiClient &client)
 
 
-// SENDER としての通信処理
-inline void comm_as_sender(WiFiClient &client, String &role) {
-  // SENDER としての役割をサーバに送信
-  client.print(role);
-  delay(1000);
+// ============================================================
+// Helper functions
+// ============================================================
 
-  // サーバからデータを受信
+// サーバからの JSON を処理
+inline bool handle_json(WiFiClient &client, JsonDocument &doc) {
   unsigned long timeout = millis();
   while (!client.available()) {
     if (millis() - timeout > 5000) {
       Serial.println("No response from server.");
       disconnect_from_server(client);
-      return;
+      return false;
     }
     delay(10);
   }
 
-  char sender_buf[SENDER_BUFFER_SIZE];
-  strncpy(sender_buf, client.readStringUntil('\n').c_str(), sizeof(sender_buf) - 1);
-  sender_buf[sizeof(sender_buf) - 1] = '\0';
-  Serial.print("Received from server: ");
-  Serial.println(sender_buf);  
-}
-
-// RECEIVER としての通信処理
-inline void comm_as_receiver(WiFiClient &client, String &role) {
-  // RECEIVER としての役割をサーバに送信
-  client.print(role);
-  delay(1000);
-
-  // RECEIVER の場合，サーバにデータを送信
-  char receiver_buf[RECEIVER_BUFFER_SIZE];
-  strncpy(receiver_buf, "Hello from ESP32 Receiver!\n", sizeof(receiver_buf) - 1);
-  receiver_buf[sizeof(receiver_buf) - 1] = '\0';
-  client.print(receiver_buf);
-  Serial.print("Sent to server: ");
-  Serial.println(receiver_buf);
-}
-
-
-
-
-// 実験条件の送受信に関する処理
-// TODO: failure を メッセージとして返す
-inline void set_condition(WiFiClient &client, int &data_type, int &payload_size, int &signal_len) {
-  unsigned long timeout = millis();
-  while (!client.available()) {
-    if (millis() - timeout > 5000) {
-      Serial.println("No response from server.");
-      disconnect_from_server(client);
-      return;
-    }
-    delay(10);
-  }
-
-  // set_condition(json) をサーバから受信
+  // JSONを受信
   String json_string = client.readStringUntil('\n');
   json_string.trim();
   Serial.print("Received JSON from server: ");
   Serial.println(json_string);
 
   // JSONをパース
-  StaticJsonDocument<256> doc;
   DeserializationError error = deserializeJson(doc, json_string);
   if (error) {
     Serial.print("Failed to parse JSON: ");
     Serial.println(error.c_str());
     disconnect_from_server(client);
+    return false;
+  } 
+  return true;
+} // inline bool handle_json(WiFiClient &client, JsonDocument &doc)
+
+// JSON-RPC 形式のレスポンスをサーバに送信
+inline void send_response(WiFiClient &client, JsonDocument &response_doc) {
+  String response;
+  serializeJson(response_doc, response);
+  client.println(response);
+  Serial.print("Sent response to server: ");
+  Serial.println(response);
+} // inline void send_response(WiFiClient &client, JsonDocument &response_doc)
+
+
+// ============================================================
+// Method Dispatching
+// ============================================================
+
+// method に応じた処理を実行
+inline void dispatch_method(WiFiClient &client, JsonDocument &doc) {
+  const char* method = doc["method"];
+
+  if(strcmp(method, "set_condition") == 0) {
+    set_condition(client, doc);
+  } else if(strcmp(method, "receive") == 0) {
+    receive(client, doc);
+  } else if(strcmp(method, "send") == 0) {
+    send(client, doc);
+  } else if(strcmp(method, "report") == 0) {
+    report(client, doc);
+  } else {
+    // TODO: handle unknown method
+    Serial.println("Unknown method received from server.");
+    return;
+  }
+} // inline void dispatch_method(WiFiClient &client, JsonDocument &doc)
+
+// ============================================================
+// Method Implementations
+// ============================================================
+
+// set_condition
+inline void set_condition(WiFiClient &client, JsonDocument &request_doc) {
+  // "params" から実験条件を取得
+  JsonObject params = request_doc["params"];
+  if (params.isNull()) {
+    Serial.println("No params found in JSON.");
     return;
   }
 
-  // JSONからデータを取得
-  const char* command = doc["command"];
-  if (strcmp(command, "set_condition") != 0) {
-    Serial.println("Invalid command received from server.");
-    disconnect_from_server(client);
-    return;
-  }
+  data_type = params["data_type"];
+  payload_size = params["payload_size"];
+  signal_len = params["signal_len"];
 
-  // json形式の"data"から実験条件を取得
-  JsonObject data = doc["data"];
-  if (data.isNull()) {
-    Serial.println("No data found in JSON.");
-    disconnect_from_server(client);
-    return;
-  }
-
-  data_type = data["data_type"];
-  payload_size = data["payload_size"];
-  signal_len = data["signal_len"];
-
-  Serial.print("command: ");
-  Serial.println(command);
   Serial.print("data_type: ");
   Serial.println(data_type);
   Serial.print("payload_size: ");
@@ -185,155 +150,74 @@ inline void set_condition(WiFiClient &client, int &data_type, int &payload_size,
   Serial.print("signal_len: ");
   Serial.println(signal_len);
 
-  // 応答をサーバに送信
-  StaticJsonDocument<256> res_doc;
-  res_doc["command"] = command;
-  res_doc["status"] = "success";
-  res_doc["data"] = ""; // 空のデータ
+  // レスポンスをサーバに送信
+  StaticJsonDocument<256> response_doc;
+  response_doc["jsonrpc"] = "2.0";
+  response_doc["result"] = "success";
+  response_doc["id"] = request_doc["id"];
+  send_response(client, response_doc);
+} // inline void set_condition(WiFiClient &client, JsonDocument &request_doc)
 
-  String response;
-  serializeJson(res_doc, response);
-  client.println(response);
-  Serial.print("Sent response to server: ");
-  Serial.println(response);
-}
+// receive
+inline void receive(WiFiClient &client, JsonDocument &request_doc) {
+  // State を更新
+  system_state = STATE_RECEIVE_RUNNING;
 
+  // receive を一時的に覚えておく
+  const char* method = request_doc["method"];
+  memset(role, 0, strlen(role));
+  strcpy(role, method);
 
-// 可視光通信の役割に関する処理
-// TODO: failure を メッセージとして返す
-inline void set_role(WiFiClient &client, char *role) {
-  unsigned long timeout = millis();
-  while (!client.available()) {
-    if (millis() - timeout > 5000) {
-      Serial.println("No response from server.");
-      disconnect_from_server(client);
-      return;
-    }
-    delay(10);
-  }
+  // レスポンスをサーバに送信
+  StaticJsonDocument<256> response_doc;
+  response_doc["jsonrpc"] = "2.0";
+  response_doc["result"] = "success";
+  response_doc["id"] = request_doc["id"];
+  send_response(client, response_doc);
+} // inline void receive(WiFiClient &client, JsonDocument &request_doc)
 
-  // set_condition(json) をサーバから受信
-  String json_string = client.readStringUntil('\n');
-  json_string.trim();
-  Serial.print("Received JSON from server: ");
-  Serial.println(json_string);
+// send
+inline void send(WiFiClient &client, JsonDocument &request_doc) {
+  // State を更新
+  system_state = STATE_SEND_RUNNING;
 
-  // JSONをパース
-  StaticJsonDocument<256> doc;
-  DeserializationError error = deserializeJson(doc, json_string);
-  if (error) {
-    Serial.print("Failed to parse JSON: ");
-    Serial.println(error.c_str());
-    disconnect_from_server(client);
+  // send を一時的に覚えておく
+  const char* method = request_doc["method"];
+  memset(role, 0, strlen(role));
+  strcpy(role, method);
+
+  // レスポンスをサーバに送信
+  StaticJsonDocument<256> response_doc;
+  response_doc["jsonrpc"] = "2.0";
+  response_doc["result"] = "success";
+  response_doc["id"] = request_doc["id"];
+  send_response(client, response_doc);
+} // inline void send(WiFiClient &client, JsonDocument &request_doc)
+
+// report
+inline void report(WiFiClient &client, JsonDocument &request_doc) {
+  if(system_state != STATE_TASK_COMPLETED) {
+    Serial.println("System is not in a state to report.");
+
+    // TODO: error を返すべき
+    StaticJsonDocument<256> error_doc;
+    error_doc["jsonrpc"] = "2.0";
+    error_doc["error"]["code"] = -32603; // Internal error
+    error_doc["error"]["message"] = "System is not in a state to report.";
+    error_doc["id"] = request_doc["id"];
+    send_response(client, error_doc);
+
     return;
   }
 
-  // JSONからデータを取得
-  const char* command = doc["command"];
-  if (strcmp(command, "receive") != 0 && strcmp(command, "send") != 0) {
-    Serial.println("Invalid command received from server.");
-    disconnect_from_server(client);
-    return;
-  }
-  strncpy(role, command, ROLE_SIZE - 1);
-  role[ROLE_SIZE - 1] = '\0';
+  // レスポンスをサーバに送信
+  StaticJsonDocument<512> response_doc;
+  response_doc["jsonrpc"] = "2.0";
+  response_doc["result"]["role"] = role;
+  response_doc["result"]["data"] = vlc_data;
+  response_doc["id"] = request_doc["id"];
+  send_response(client, response_doc);
 
-
-  // json形式の"data"から実験条件を取得
-  JsonObject data = doc["data"];
-  if (data.isNull()) {
-    Serial.println("No data found in JSON.");
-    disconnect_from_server(client);
-    return;
-  }
-
-  int id = data["id"];
-
-  Serial.print("command: ");
-  Serial.println(command);
-  Serial.print("id: ");
-  Serial.println(id);
-
-  // 応答をサーバに送信
-  StaticJsonDocument<256> res_doc;
-  res_doc["command"] = command;
-  res_doc["status"] = "success";
-  res_doc["data"] = ""; // 空のデータ
-
-  String response;
-  serializeJson(res_doc, response);
-  client.println(response);
-  Serial.print("Sent response to server: ");
-  Serial.println(response);
-}
-
-inline void comm_report(WiFiClient client, char *role, char *vlc_data) {
-  unsigned long timeout = millis();
-  while (!client.available()) {
-    if (millis() - timeout > 5000) {
-      Serial.println("No response from server.");
-      disconnect_from_server(client);
-      return;
-    }
-    delay(10);
-  }
-
-  // set_condition(json) をサーバから受信
-  String json_string = client.readStringUntil('\n');
-  json_string.trim();
-  Serial.print("Received JSON from server: ");
-  Serial.println(json_string);
-
-  // JSONをパース
-  StaticJsonDocument<256> doc;
-  DeserializationError error = deserializeJson(doc, json_string);
-  if (error) {
-    Serial.print("Failed to parse JSON: ");
-    Serial.println(error.c_str());
-    disconnect_from_server(client);
-    return;
-  }
-
-  // JSONからデータを取得
-  const char* command = doc["command"];
-  if (strcmp(command, "report") != 0) {
-    Serial.println("Invalid command received from server.");
-    disconnect_from_server(client);
-    return;
-  }
-  strncpy(role, command, ROLE_SIZE - 1);
-  role[ROLE_SIZE - 1] = '\0';
-
-
-  // json形式の"data"から実験条件を取得
-  JsonObject data = doc["data"];
-  if (data.isNull()) {
-    Serial.println("No data found in JSON.");
-    disconnect_from_server(client);
-    return;
-  }
-
-  int id = data["id"];
-
-  Serial.print("command: ");
-  Serial.println(command);
-  Serial.print("id: ");
-  Serial.println(id);
-
-  // 応答をサーバに送信
-  StaticJsonDocument<512> res_data_doc;
-  res_data_doc["role"] = role;
-  res_data_doc["id"] = id;
-  res_data_doc["data"] = vlc_data; // 受信したデータ
-
-  StaticJsonDocument<512> res_doc;
-  res_doc["command"] = command;
-  res_doc["status"] = "success";
-  res_doc["data"] = res_data_doc;
-
-  String response;
-  serializeJson(res_doc, response);
-  client.println(response);
-  Serial.print("Sent response to server: ");
-  Serial.println(response);
+  // State を更新
+  system_state = STATE_IDLE;
 }

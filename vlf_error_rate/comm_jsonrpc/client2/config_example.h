@@ -16,7 +16,8 @@ const char *serverIP = "123.456.789.012";
 const int serverPort = 12345;
 
 // Buffer sizes
-#define RECEIVE_BUFFER_SIZE 1024
-#define SEND_BUFFER_SIZE 1100
+#define BINARY_BUFFER_SIZE 1024
+#define HEX_DATA_BUFFER_SIZE 256
+#define ROLE_SIZE 10
 
 #endif // CONFIG_H

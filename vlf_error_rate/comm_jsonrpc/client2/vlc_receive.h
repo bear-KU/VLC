@@ -1,0 +1,144 @@
+#pragma once
+#include <Arduino.h>
+#include "server_comm.h"
+#include "config.h"
+#include "esp_timer.h"
+#include "data_handling.h"
+
+#define LED_PIN  4
+
+// Function Prototypes
+inline String run_vlc_receive(int payload_size);
+inline int get_threshold();
+inline String LED_read_binary(int payload_size, int threshold);
+inline int get_light_intensity();
+
+// ============================================================
+// VLC Communication Functions
+// ============================================================
+
+inline String run_vlc_receive(int payload_size) {
+  String data = "";
+  int i;
+
+  data.reserve(BINARY_BUFFER_SIZE + 1);
+
+  // 閾値の設定
+  int threshold = get_threshold();
+
+  int count = BINARY_BUFFER_SIZE / payload_size;
+  for (i = 0; i < count; i++) {
+    String received = LED_read_binary(payload_size, threshold);
+    data += received;  // data << string 的な連結
+    // Serial.printf("Iteration %d: %s\r\n", i+1, received.c_str());
+    delay(10);
+  }
+
+  // Serial.printf("All received data: %s\r\n", data.c_str());
+  String hex_data;
+  hex_data.reserve(HEX_DATA_BUFFER_SIZE + 1);
+  hex_data = binary_to_hex_string(data);
+  return hex_data;
+}
+
+inline int get_threshold() {
+  int threshold = 150;
+  int i = 0;
+  int value = 0;
+
+  while(i < 1000) {
+    value = get_light_intensity();
+    delay(1);
+    if (threshold < value) {
+      threshold = value;
+    }
+    i++;
+  }
+  Serial.printf("Threshold: %d\r\n", threshold);
+  delay(10);
+
+  return threshold;
+}
+
+String LED_read_binary(int payload_size, int threshold) {
+  int value = 0, prev_v = 0;
+  int64_t signal_unit = 0, signal_len = 0;
+  int64_t time;
+  int64_t edge_down_time = 0;
+  int64_t edge_up_time = 0;
+  int data_len = 0;
+  int i = 0;
+  
+  String result = "";
+  result.reserve(payload_size + 1);
+
+  while(1) {
+    time = esp_timer_get_time();
+
+    value = get_light_intensity() - threshold;
+    if (value < 0) {
+      value = 0;
+    }
+
+    // TODO: 通信のエラー時のための処理
+    // 通信時間が長すぎる場合は終了
+
+    // 終了判定
+    if( (signal_unit != 0) &&
+        (signal_unit * 4 < (time - edge_up_time)) &&
+     	  (edge_down_time < edge_up_time))
+    {
+      Serial.println(result);
+      return result; // ここで結果を返して終了
+    }
+
+    // 1. 直前が Low，現在が High の場合(立ち上がり)
+    if(prev_v == 0 && value != 0) {
+      if((signal_unit * 0.7) < (time - edge_down_time)) {
+        edge_up_time = time;
+      } 
+    }
+    // 2. 直前が High，現在が Low の場合(立ち下がり)
+    else if(prev_v != 0 && value == 0) {
+      edge_down_time = time;
+      
+      // デコード
+      signal_len = edge_down_time - edge_up_time;
+      if(signal_unit == 0) {
+        signal_unit = signal_len;
+      }
+      else {
+        if(((signal_unit / 2) < signal_len) && data_len < BINARY_BUFFER_SIZE+1) {
+          // データが0/1を判定
+          if(signal_unit < signal_len * 0.6) {
+            result += '1';          
+          }
+          else {
+            result += '0';
+          }
+          data_len++;
+        }  
+      }
+    }
+    // 3. 直前と現在が同じ場合
+    else {
+      // 何もしない
+    }
+
+    // 直前の値を更新
+    prev_v = value;
+
+  }
+  
+  // ここに到達することは通常ないが、安全のため空文字を返す
+  return "";
+} // LED_read_binary
+
+inline int get_light_intensity() {
+  int intensity = 0;
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, 0);
+  pinMode(LED_PIN, INPUT);
+  intensity = analogRead(LED_PIN);
+  return intensity;
+}

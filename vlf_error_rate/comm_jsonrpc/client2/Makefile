@@ -16,14 +16,6 @@ endif
 
 PROJECT_DIR = .
 
-# ifeq ($(ROLE), SENDER)
-#   BUILD_FLAG = -DROLE_SENDER
-# else ifeq ($(ROLE), RECEIVER)
-#   BUILD_FLAG = -DROLE_RECEIVER
-# else
-# 	$(error Unknown ROLE specified: $(ROLE))
-# endif
-
 
 # Default Targets
 all: compile upload
