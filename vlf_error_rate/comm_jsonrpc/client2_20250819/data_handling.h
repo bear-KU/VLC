@@ -40,11 +40,6 @@ inline String binary_to_hex_string(const String &binary) {
     for (int i = 0; i < targetLen; i += 4) {
         String nibble = binary.substring(i, i + 4);
         
-        if (nibble == "xxxx") {
-            hex += nibble;
-            continue;
-        }
-        
         char hexChar = binary_to_hex_char(nibble);
         if (hexChar != '\0') {
             hex += hexChar;

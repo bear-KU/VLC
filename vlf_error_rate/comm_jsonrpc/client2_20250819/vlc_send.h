@@ -18,9 +18,8 @@ inline String run_vlc_send(int data_type, int payload_size, int signal_len);
 // ============================================================
 inline void send_leader() {
   digitalWrite(LED_PIN, 1);
-  delayMicroseconds(signal_len * 8);
+  delayMicroseconds(signal_len);
   digitalWrite(LED_PIN, 0);
-  delayMicroseconds(signal_len * 4);
 }
 
 inline void send_data0() {
