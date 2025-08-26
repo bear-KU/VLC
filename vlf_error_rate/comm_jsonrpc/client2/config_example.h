@@ -22,7 +22,7 @@ const int serverPort = 12345;
 #define CALLBACK_METHOD_SIZE 64
 
 // Communication timeout
-#define COMMUNICATION_TIMEOUT 5000  // [ms]
+#define COMMUNICATION_TIMEOUT 5000000  // [μs]
 /*
  * The timeout is set to 5000 ms to account for the worst-case transmission time.
  * - When all data bits are 1 and the payload size is 1024, the transmission time is maximized.
