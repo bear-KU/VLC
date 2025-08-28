@@ -41,7 +41,7 @@ inline String run_vlc_receive(int payload_size) {
 
     data += received;
     // Serial.printf("Iteration %d: %s\r\n", i+1, received.c_str());
-    delay(15); // 前回のトレイラの残りを読み込まないようにするため待つ
+    delay(90); // 前回のトレイラの残りを読み込まないようにするため待つ
   }
 
   // Serial.printf("All received data: %s\r\n", data.c_str());
@@ -146,7 +146,7 @@ inline String LED_read_binary(int payload_size, int threshold) {
 
   // 基準時間の表示
   signal_unit = sig_reader_bright / 8;
-  Serial.printf("sig_reader_bright: %lld\r\n", sig_reader_bright);
+  // Serial.printf("sig_reader_bright: %lld\r\n", sig_reader_bright);
 
   value = 0;
   prev_v = 0;
@@ -209,13 +209,14 @@ inline String LED_read_binary(int payload_size, int threshold) {
 
       if(((signal_unit / 2) < signal_len) && data_len < BINARY_BUFFER_SIZE+1) {
         // データが0/1を判定
-        if(signal_unit < signal_len * 0.6) {
-          result += '1';          
+        if(signal_unit < signal_len * 0.55) {
+          result += '1';
         }
         else {
           result += '0';
         }
         data_len++;
+        i++;
       }  
     }
     // 3. 直前と現在が同じ場合
@@ -225,8 +226,8 @@ inline String LED_read_binary(int payload_size, int threshold) {
 
     // 直前の値を更新
     prev_v = value;
-    i++;
   }
+  // Serial.printf("result: %s\r\n", result.c_str());
   return result;
 } // LED_read_binary
 

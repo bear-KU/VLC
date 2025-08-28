@@ -100,7 +100,7 @@ inline String run_vlc_send(int data_type, int payload_size, unsigned int signal_
 
       payload[payload_size] = '\0';
       LED_send(payload);
-      delay(20);
+      delay(100);
     }
 
     String hex_data;

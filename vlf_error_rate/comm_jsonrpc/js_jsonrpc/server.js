@@ -1,6 +1,6 @@
 // Module
 const net = require("net");
-const { JSONRPCClient } = require("json-rpc-2.0");
+const { JSONRPCClient, JSONRPCServer } = require("json-rpc-2.0");
 
 // Configuration
 const HOST = "192.168.1.63";
@@ -26,6 +26,30 @@ function createJsonRpcClient(socket) {
     });
 }
 
+// JSON-RPC Server Creation
+function createJsonRpcServer() {
+    const server = new JSONRPCServer();
+    
+    // ESP32からのprepareReport通知を処理
+    server.addMethod("prepareReport", (params) => {
+        console.log("Received prepareReport notification:", params);
+        
+        // roleベースで待機中のPromiseを解決
+        if (pendingNotifications.has(params.role)) {
+            const { resolve } = pendingNotifications.get(params.role);
+            pendingNotifications.delete(params.role);
+            resolve(params);
+        } else {
+            console.warn(`No pending notification found for role: ${params.role}`);
+        }
+        
+        // Notification（戻り値なし）
+        return undefined;
+    });
+    
+    return server;
+}
+
 // Select Communication Type
 function selectCommunicationType(index) {
     return index === 0 ? "receive" : "send";
@@ -44,7 +68,17 @@ async function setCondition(rpcClient) {
 // Send "send" or "receive" Request
 async function runCommunication(rpcClient, method) {
     console.log("Sending '" + method + "' request...");
-    return rpcClient.request(method);
+    return rpcClient.request(method, {
+        callback: "prepareReport"
+    });
+}
+
+// Receive "prepareReport" Notification
+async function waitForPrepareReportNotification(role) {
+    return new Promise((resolve, reject) => {
+        // roleをキーとして待機中のPromiseを保存
+        pendingNotifications.set(role, { resolve, reject });
+    });
 }
 
 // Send "report" Request
@@ -58,10 +92,15 @@ async function handleClientConnection(socket, clientIndex) {
     const clientAddress = `${socket.remoteAddress}:${socket.remotePort}`;
     console.log(`\n--- New connection from ${clientAddress} ---`);
 
-    // 送信
+    // 送信用のJSON-RPCクライアント
     const rpcClient = createJsonRpcClient(socket);
+    
+    // 受信用のJSON-RPCサーバー
+    const rpcServer = createJsonRpcServer();
 
-    // 受信
+
+    // 受信時のイベントリスナー
+    // ソケットにデータが到着したときに実行される
     let buffer = "";
     socket.on("data", (data) => {
         buffer += data.toString("utf-8");
@@ -73,7 +112,22 @@ async function handleClientConnection(socket, clientIndex) {
 
             try {
                 const message = JSON.parse(line);
-                rpcClient.receive(message);
+                                
+                // JSON-RPC リクエスト/通知（サーバー側）
+                if (message.method) {
+                    rpcServer.receive(message).then((response) => {
+                        // リクエストの場合はレスポンスを送信
+                        if (response && socket.writable) {
+                            socket.write(JSON.stringify(response) + "\n", "utf-8");
+                        }
+                        // 通知の場合はレスポンスなし
+                    }).catch((error) => {
+                        console.error("JSON-RPC Server error:", error);
+                    });
+                } else if (!message.method) {
+                    // JSON-RPC レスポンス（クライアント側）
+                    rpcClient.receive(message);
+                }
             } catch (err) {
                 console.error("Failed to parse message:", err.message);
                 console.error("Raw message:", line);
@@ -87,12 +141,10 @@ async function handleClientConnection(socket, clientIndex) {
 
     // Select Communication Type
     // 0: receive, 1: send
-    // TODO: 今は0となっているが，接続順に応じて決定できるようにする
     const communicationMethod = selectCommunicationType(clientIndex % 2);
-    const totalIterations = 1;
 
     try {
-        // Send 'set_condition' Request
+        // Step 1:'set_condition' Request
         try {
             const setResult = await setCondition(rpcClient);
             console.log(`[${clientAddress}] 'set_condition' request sent successfully:`, setResult);
@@ -101,20 +153,31 @@ async function handleClientConnection(socket, clientIndex) {
             throw error;
         }
 
-        for (let i = 0; i < totalIterations; i++) {
-            console.log(`[${clientAddress}] Iteration ${i + 1}/${totalIterations} for '${communicationMethod}' communication...`);
+        
+        for (let i = 0; i < totalTransmissions; i++) {
+            console.log(`[${clientAddress}] Iteration ${i + 1}/${totalTransmissions} for '${communicationMethod}' communication...`);
 
-            // Send 'send' or 'receive' Request
+
+            // Step 2: 'send' or 'receive' Request
             try {
                 const runCommResult = await runCommunication(rpcClient, communicationMethod);
-                console.log(`[${clientAddress}] 'run_communication' request sent successfully:`, runCommResult);
+                console.log(`[${clientAddress}] '${communicationMethod}' request sent successfully:`, runCommResult);
             } catch (error) {
-                console.error(`[${clientAddress}] 'run_communication' request failed:`, error.message);
+                console.error(`[${clientAddress}] '${communicationMethod}' request failed:`, error.message);
                 throw error;
             }
-        
 
-            // Send 'report' Request
+            // Step 3: Wait for 'prepareReport' notification
+            try {
+                console.log(`[${clientAddress}] Waiting for 'prepareReport' notification from ESP32...`);
+                const notificationResult = await waitForPrepareReportNotification(communicationMethod);
+                console.log(`[${clientAddress}] 'prepareReport' notification received:`, notificationResult);
+            } catch (error) {
+                console.error(`[${clientAddress}] Failed to receive 'prepareReport' notification:`, error.message);
+                throw error;
+            }
+
+            // Step 4: 'report' Request
             try {
                 const reportResult = await report(rpcClient);
                 console.log(`[${clientAddress}] 'report' request sent successfully:`, reportResult);
@@ -128,23 +191,65 @@ async function handleClientConnection(socket, clientIndex) {
                 console.error(`[${clientAddress}] 'report' request failed:`, error.message);
                 throw error;
             }
+
+            clientsReady[communicationMethod] = true; 
+            while (!clientsReady.receive || !clientsReady.send) {
+                await new Promise(resolve => setTimeout(resolve, 100)); // 100ms待機
+            }
+            console.log(`[${clientAddress}] Report status: receive=${clientsReady.receive}, send=${clientsReady.send}`);
+
+
+            // Step 5: データ比較（両方の報告が完了してから）
+
+            console.log(`[${clientAddress}] Checking data comparison: receive=${!!roleData.receive}, send=${!!roleData.send}`);
+
+            if (roleData.receive && roleData.send) {                
+                // データを比較
+                if (roleData.receive === roleData.send) {
+                    successfulTransmissions++;
+                    console.log(`[Iteration ${i + 1}] Data transmission successful - data matches!`);
+                } else {
+                    console.log(`[Iteration ${i + 1}] Data transmission failed - data does not match`);
+                }
+                
+                // 比較完了後、両方のデータをクリア
+                roleData.receive = null;
+                roleData.send = null;
+            }
+
+                        // 両方のクライアントが報告完了するまで待機
+            clientsReady[communicationMethod] = false; 
+            while (clientsReady.receive || clientsReady.send) {
+                await new Promise(resolve => setTimeout(resolve, 100)); // 100ms待機
+            }
+            console.log(`[${clientAddress}] Report status: receive=${clientsReady.receive}, send=${clientsReady.send}`);
+
         }
 
         console.log(`[${clientAddress}] All steps completed successfully.`);
         
-        // 両方のデータが揃ったかチェック
-        if (roleData.receive && roleData.send) {
-            // データを比較する処理をここに追加可能
-            if (roleData.receive === roleData.send) {
-                console.log("Data transmission successful - data matches!");
-            } else {
-                console.log("Data transmission failed - data does not match");
-            }
+        // 両方のクライアントが完了したかチェック
+        if (!roles.receive && !roles.send) {
+            // エラーレート計算
+            const errorRate = ((totalTransmissions - successfulTransmissions) / totalTransmissions) * 100;
+            const successRate = (successfulTransmissions / totalTransmissions) * 100;
             
-            // データをクリア（次回のテスト用）
-            roleData.receive = null;
-            roleData.send = null;
+            console.log("\n" + "=".repeat(50));
+            console.log("FINAL TRANSMISSION STATISTICS");
+            console.log("=".repeat(50));
+            console.log(`Total transmissions: ${totalTransmissions}`);
+            console.log(`Successful transmissions: ${successfulTransmissions}`);
+            console.log(`Failed transmissions: ${totalTransmissions - successfulTransmissions}`);
+            console.log(`Success rate: ${successRate.toFixed(2)}%`);
+            console.log(`Error rate: ${errorRate.toFixed(2)}%`);
+            console.log("=".repeat(50));
+            
+            // カウンターをリセット（次回のテスト用）
+            totalTransmissions = 0;
+            successfulTransmissions = 0;
         }
+        
+
         
         // for文が終了したらソケットを閉じて処理を終了
         console.log(`[${clientAddress}] Closing connection after completing all iterations.`);
@@ -171,8 +276,21 @@ const roleData = {
     send: null,    // 送信側のデータ
 };
 
-const activeSockets = new Set();
+// 通知待機用
+const pendingNotifications = new Map(); // role -> { resolve, reject }
 
+// 準備完了フラグ
+const clientsReady = {
+    receive: false,
+    send: false
+};
+
+// エラーレート計測用
+let totalTransmissions = 3;  // 総通信回数
+let successfulTransmissions = 0;  // 成功した通信回数
+
+// アクティブソケット
+const activeSockets = new Set();
 
 // Server Creation
 const server = net.createServer((socket) => {
@@ -199,6 +317,7 @@ const server = net.createServer((socket) => {
         if (assignedRole) {
             roles[assignedRole] = null;
             roleData[assignedRole] = null; // データもクリア
+            clientsReady[assignedRole] = false; // 準備状態もクリア
             console.log(`Slot ${assignedRole} is now free.`);
         }
 
@@ -210,6 +329,7 @@ const server = net.createServer((socket) => {
         if (assignedRole) {
             roles[assignedRole] = null;
             roleData[assignedRole] = null; // データもクリア
+            clientsReady[assignedRole] = false; // 準備状態もクリア
             console.log(`Slot ${assignedRole} is now free due to error.`);
         }
     });
