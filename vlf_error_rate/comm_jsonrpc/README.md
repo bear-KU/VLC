@@ -25,22 +25,29 @@ comm_jsonrpc は，2台の ESP32 の可視光通信における，データの�
 
 # Launch
 ## 事前準備
-1. config.h を作成する
+1. server.js を開き，Wi-Fi に関する箇所を書き換える
+  ```config.h
+  // Configuration
+  const HOST = "192.168.1.63"; // サーバを動かすマシン の IP アドレス
+  const PORT = 61001;          // ポート
+  ```
+
+2. config.h を作成する
   ```bash
   $ cd /your/path/to/directory/VLC/vlf_error_rate/comm_jsonrpc/client2
   $ cp config_example.h config.h 
   ```
-2. config.h を開き， Wi-Fi に関する箇所を自身のものに書き換える
+3. config.h を開き， Wi-Fi に関する箇所を書き換える
   ```config.h
   // WiFi configuration
   const char *ssid = "exampleSSID";
   const char *password = "examplePassword";
 
   // Server configuration
-  const char *serverIP = "123.456.789.012";
-  const int serverPort = 12345;
+  const char *serverIP = "123.456.789.012"; // サーバを動かすマシン の IP アドレス
+  const int serverPort = 12345; // ポート
   ```
-3. Makefile を開き，ESP32 が接続しているポート名と LED が利用する GPIO のピンを書き換える
+4. Makefile を開き，ESP32 が接続しているポート名と LED が利用する GPIO のピンを書き換える
   ```Makefile
   // 他のマイコンボードを用いる場合は，以下に追加する
   ifeq ($(BOARD), esp32s3)
