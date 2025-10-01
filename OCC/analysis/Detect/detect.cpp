@@ -16,11 +16,11 @@ struct LedState
 
 // LEDを「見つける」ためのしきい値 (findLED関数内で使用)
 // 画面から明るい点として分離できる、高めの値が望ましい
-const double DETECTION_THRESHOLD = 254.0;
+const double DETECTION_THRESHOLD = 250.0;
 
 // LEDの「ON/OFF状態」を判断するためのしきい値 (main関数内で使用)
 // LEDのOFF状態とON状態の、中間の明るさに設定するのが理想
-const double STATE_CHANGE_THRESHOLD = 230.0;
+const double STATE_CHANGE_THRESHOLD = 240.0;
 
 
 // フレームからLEDのROIを自動検出する関数
@@ -37,8 +37,16 @@ cv::Rect findLED(const cv::Mat& frame)
     cv::Mat thresh;
     cv::threshold(gray, thresh, DETECTION_THRESHOLD, 255, cv::THRESH_BINARY);
 
-    cv::erode(thresh, thresh, cv::Mat(), cv::Point(-1, -1), 2);
-    cv::dilate(thresh, thresh, cv::Mat(), cv::Point(-1, -1), 2);
+
+    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
+
+    // Opening 処理でノイズ除去
+    cv::erode(thresh, thresh, kernel, cv::Point(-1, -1), 2);
+    cv::dilate(thresh, thresh, kernel, cv::Point(-1, -1), 2);
+
+    // Closing 処理で穴埋め
+    cv::dilate(thresh, thresh, kernel, cv::Point(-1, -1), 2);
+    cv::erode(thresh, thresh, kernel, cv::Point(-1, -1), 2);
 
     cv::imshow("Debug - Threshold View", thresh);
 

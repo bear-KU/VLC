@@ -10,7 +10,7 @@ struct LedState {
 };
 
 // 閾値
-const double BRIGHTNESS_THRESHOLD = 200.0;
+const double BRIGHTNESS_THRESHOLD = 250.0;
 
 // バイナリ文字列をASCIIに変換する関数
 std::string binaryToAscii(const std::string& binary) {
