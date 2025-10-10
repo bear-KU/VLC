@@ -44,6 +44,7 @@ void trackerThreadFunction(int id, ThreadSafeQueue<FrameUpdate>* queue)
     bool last_state_is_on = false;
     int state_counter = 0;
     double T_frames = 0.0;
+    bool is_rejected = false;
 
     while (true)
     {

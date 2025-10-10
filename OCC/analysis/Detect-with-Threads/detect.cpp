@@ -58,6 +58,7 @@ int main(int argc, char *argv[])
     while (true)
     {
         cap >> frame;
+        cv::flip(frame, frame, 0); // 垂直反転
         if (frame.empty()) break;
         
         cv::Mat gray;
@@ -114,7 +115,7 @@ int main(int argc, char *argv[])
         
         for (const auto &tracker : activeTrackers) {
             cv::rectangle(frame, cv::Point(tracker.pos.x-15, tracker.pos.y-15), cv::Point(tracker.pos.x+15, tracker.pos.y+15), cv::Scalar(0, 255, 0), 2);
-            cv::putText(frame, "ID:" + std::to_string(tracker.id), cv::Point(tracker.pos.x-10, tracker.pos.y-20), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
+            cv::putText(frame, "Tracker " + std::to_string(tracker.id), cv::Point(tracker.pos.x-10, tracker.pos.y-20), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
         }
 
         cv::imshow("Detection View", frame);
