@@ -10,39 +10,37 @@ int tracker_id_counter = 0;
 
 std::mutex boxes_mutex;
 
-
-void mergeOverlappingBoxes(std::vector<cv::Rect>& boxes) {
-    if (boxes.empty()) {
+// 重なった領域をマージする関数
+void mergeOverlappingBoxes(std::vector<cv::Rect>& boxes)
+{
+    if (boxes.empty())
+    {
         return;
     }
 
     bool merged;
-    do {
+    do 
+    {
         merged = false;
-        // i はリストの最初から最後まで走査
-        for (size_t i = 0; i < boxes.size(); ++i) {
-            // j は i の一つ後ろからスタートし、重複比較を避ける
-            for (size_t j = i + 1; j < boxes.size(); ++j) {
+        for (size_t i = 0; i < boxes.size(); ++i)
+        {
+            for (size_t j = i + 1; j < boxes.size(); ++j)
+            {
                 // 2つの矩形の共通領域を計算
                 cv::Rect intersection = boxes[i] & boxes[j];
 
-                // 共通領域の面積が0より大きい場合（=重なっている場合）
-                if (intersection.area() > 0) {
-                    // 2つの矩形を完全に含む最小の矩形（Union）で i 番目を更新
-                    boxes[i] |= boxes[j];
-                    
-                    // 統合された j 番目の矩形をリストから削除
+                // 重なっている場合
+                if (intersection.area() > 0)
+                {
+                    boxes[i] |= boxes[j];                    
                     boxes.erase(boxes.begin() + j);
-                    
-                    // リストの要素数が変わったので、j のループを1つ戻す必要がある
                     --j;
                     
-                    // マージが行われたことを示すフラグを立てる
                     merged = true;
                 }
             }
         }
-    } while (merged); // マージが行われている間は、再度全体をチェックし続ける
+    } while (merged);
 }
 
 std::vector<cv::Rect> detectLightSource(const cv::Mat& gray)
@@ -57,7 +55,8 @@ std::vector<cv::Rect> detectLightSource(const cv::Mat& gray)
     const int overlap = 20;
 
     auto process_slice = 
-        [&](const cv::Rect& roi) {
+        [&](const cv::Rect& roi)
+        {
             cv::Mat sub_gray = gray(roi);
 
             cv::Mat thresh;
@@ -70,7 +69,8 @@ std::vector<cv::Rect> detectLightSource(const cv::Mat& gray)
             cv::findContours(thresh, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
             std::vector<cv::Rect> local_boxes;
-            for (const auto& contour : contours) {
+            for (const auto& contour : contours)
+            {
                 double area = cv::contourArea(contour);
                 if (area >= MIN_CONTOUR_AREA && area <= MAX_CONTOUR_AREA) {
                     cv::Rect box = cv::boundingRect(contour);
@@ -80,13 +80,15 @@ std::vector<cv::Rect> detectLightSource(const cv::Mat& gray)
                 }
             }
 
-            if (!local_boxes.empty()) {
+            if (!local_boxes.empty())
+            {
                 std::lock_guard<std::mutex> lock(boxes_mutex);
                 total_boxes.insert(total_boxes.end(), local_boxes.begin(), local_boxes.end());
             }
         };
 
-    for (int i = 0; i < num_threads; ++i) {
+    for (int i = 0; i < num_threads; ++i)
+    {
         int y_start = i * slice_height;
         int y_end = (i == num_threads - 1) ? gray.rows : y_start + slice_height;
         int roi_y_start = std::max(0, y_start - overlap);
@@ -96,11 +98,13 @@ std::vector<cv::Rect> detectLightSource(const cv::Mat& gray)
         threads.emplace_back(process_slice, roi);
     }
 
-    for (auto& t : threads) {
+    for (auto& t : threads)
+    {
         t.join();
     }
 
-    if (!total_boxes.empty()) {
+    if (!total_boxes.empty())
+    {
         mergeOverlappingBoxes(total_boxes);
     }
     
@@ -167,34 +171,42 @@ int main(int argc, char *argv[])
         std::vector<cv::Rect> detections = detectLightSource(gray);
         std::vector<bool> matched(detections.size(), false);
 
-        for (auto& tracker : activeTrackers) {
+        for (auto& tracker : activeTrackers)
+        {
             int best_index = -1;
             double best_dist = 15.0;
-            for (size_t i = 0; i < detections.size(); ++i) {
+            for (size_t i = 0; i < detections.size(); ++i)
+            {
                 if (matched[i]) continue;
                 cv::Point2f center(detections[i].x + detections[i].width/2.0, detections[i].y + detections[i].height/2.0);
                 double dist = cv::norm(tracker.pos - center);
-                if (dist < best_dist) {
+                if (dist < best_dist)
+                {
                     best_dist = dist;
                     best_index = i;
                 }
             }
            
-            if (best_index != -1) {
+            if (best_index != -1) 
+            {
                 tracker.pos = cv::Point2f(detections[best_index].x + detections[best_index].width/2.0, detections[best_index].y + detections[best_index].height/2.0);
                 tracker.miss_count = 0;
                 matched[best_index] = true;
                 int x = std::clamp((int)tracker.pos.x, 0, gray.cols - 1);
                 int y = std::clamp((int)tracker.pos.y, 0, gray.rows - 1);
                 tracker.frame_queue.push({false, true, gray.at<uchar>(y, x)});
-            } else {
+            }
+            else
+            {
                 tracker.miss_count++;
                 tracker.frame_queue.push({false, false, 0});
             }
         }
 
-        activeTrackers.remove_if([](Tracker& t) {
-            if (t.miss_count > MISS_COUNT_FOR_DELETION) {
+        activeTrackers.remove_if([](Tracker& t)
+        {
+            if (t.miss_count > MISS_COUNT_FOR_DELETION)
+            {
                 // デストラクタがjoinを処理するので、ここではシグナルを送るだけでよい
                 t.frame_queue.push({true});
                 return true;
@@ -202,8 +214,10 @@ int main(int argc, char *argv[])
             return false;
         });
 
-        for (size_t i = 0; i < detections.size(); ++i) {
-            if (!matched[i]) {
+        for (size_t i = 0; i < detections.size(); ++i)
+        {
+            if (!matched[i])
+            {
                 activeTrackers.emplace_back(); // デフォルトコンストラクタで追加
                 Tracker& new_tracker_ref = activeTrackers.back();
                 new_tracker_ref.id = tracker_id_counter++;
@@ -212,7 +226,8 @@ int main(int argc, char *argv[])
             }
         }
         
-        for (const auto &tracker : activeTrackers) {
+        for (const auto &tracker : activeTrackers)
+        {
             cv::rectangle(frame, cv::Point(tracker.pos.x-15, tracker.pos.y-15), cv::Point(tracker.pos.x+15, tracker.pos.y+15), cv::Scalar(0, 255, 0), 2);
             cv::putText(frame, "Tracker " + std::to_string(tracker.id), cv::Point(tracker.pos.x-10, tracker.pos.y-20), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
         }
