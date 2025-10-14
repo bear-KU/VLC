@@ -8,33 +8,132 @@ const double MAX_CONTOUR_AREA = 1000.0;
 const int MISS_COUNT_FOR_DELETION = 30;
 int tracker_id_counter = 0;
 
-// フレームから明るい光源（LED）を検出する関数
+std::mutex boxes_mutex;
+
+
+void mergeOverlappingBoxes(std::vector<cv::Rect>& boxes) {
+    if (boxes.empty()) {
+        return;
+    }
+
+    bool merged;
+    do {
+        merged = false;
+        // i はリストの最初から最後まで走査
+        for (size_t i = 0; i < boxes.size(); ++i) {
+            // j は i の一つ後ろからスタートし、重複比較を避ける
+            for (size_t j = i + 1; j < boxes.size(); ++j) {
+                // 2つの矩形の共通領域を計算
+                cv::Rect intersection = boxes[i] & boxes[j];
+
+                // 共通領域の面積が0より大きい場合（=重なっている場合）
+                if (intersection.area() > 0) {
+                    // 2つの矩形を完全に含む最小の矩形（Union）で i 番目を更新
+                    boxes[i] |= boxes[j];
+                    
+                    // 統合された j 番目の矩形をリストから削除
+                    boxes.erase(boxes.begin() + j);
+                    
+                    // リストの要素数が変わったので、j のループを1つ戻す必要がある
+                    --j;
+                    
+                    // マージが行われたことを示すフラグを立てる
+                    merged = true;
+                }
+            }
+        }
+    } while (merged); // マージが行われている間は、再度全体をチェックし続ける
+}
+
 std::vector<cv::Rect> detectLightSource(const cv::Mat& gray)
 {
-    cv::Mat thresh;
-    cv::threshold(gray, thresh, DETECTION_THRESHOLD, 255, cv::THRESH_BINARY);
-    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
-    cv::morphologyEx(thresh, thresh, cv::MORPH_OPEN, kernel);
-    cv::morphologyEx(thresh, thresh, cv::MORPH_CLOSE, kernel);
+    const int num_threads = std::thread::hardware_concurrency();
+    // const int num_threads = 1;
+    // std::cout << "使用するスレッド数: " << num_threads << std::endl;
+    std::vector<cv::Rect> total_boxes;
+    std::vector<std::thread> threads;
 
-    // cv::namedWindow("Debug - Threshold View", cv::WINDOW_NORMAL);
-    // cv::resizeWindow("Debug - Threshold View", 900, 1200);
-    // cv::imshow("Debug - Threshold View", thresh);
+    const int slice_height = gray.rows / num_threads;
+    const int overlap = 20;
 
-    std::vector<std::vector<cv::Point>> contours;
-    cv::findContours(thresh, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-    
-    std::vector<cv::Rect> boxes;
-    for (const auto& contour : contours)
-    {
-        double area = cv::contourArea(contour);
-        if (area >= MIN_CONTOUR_AREA && area <= MAX_CONTOUR_AREA)
-        {
-            boxes.push_back(cv::boundingRect(contour));
-        }
+    auto process_slice = 
+        [&](const cv::Rect& roi) {
+            cv::Mat sub_gray = gray(roi);
+
+            cv::Mat thresh;
+            cv::threshold(sub_gray, thresh, DETECTION_THRESHOLD, 255, cv::THRESH_BINARY);
+            cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
+            cv::morphologyEx(thresh, thresh, cv::MORPH_OPEN, kernel);
+            cv::morphologyEx(thresh, thresh, cv::MORPH_CLOSE, kernel);
+
+            std::vector<std::vector<cv::Point>> contours;
+            cv::findContours(thresh, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+            std::vector<cv::Rect> local_boxes;
+            for (const auto& contour : contours) {
+                double area = cv::contourArea(contour);
+                if (area >= MIN_CONTOUR_AREA && area <= MAX_CONTOUR_AREA) {
+                    cv::Rect box = cv::boundingRect(contour);
+                    box.x += roi.x;
+                    box.y += roi.y;
+                    local_boxes.push_back(box);
+                }
+            }
+
+            if (!local_boxes.empty()) {
+                std::lock_guard<std::mutex> lock(boxes_mutex);
+                total_boxes.insert(total_boxes.end(), local_boxes.begin(), local_boxes.end());
+            }
+        };
+
+    for (int i = 0; i < num_threads; ++i) {
+        int y_start = i * slice_height;
+        int y_end = (i == num_threads - 1) ? gray.rows : y_start + slice_height;
+        int roi_y_start = std::max(0, y_start - overlap);
+        int roi_y_end   = std::min(gray.rows, y_end + overlap);
+
+        cv::Rect roi(0, roi_y_start, gray.cols, roi_y_end - roi_y_start);
+        threads.emplace_back(process_slice, roi);
     }
-    return boxes;
+
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    if (!total_boxes.empty()) {
+        mergeOverlappingBoxes(total_boxes);
+    }
+    
+    return total_boxes;
 }
+
+// // フレームから明るい光源（LED）を検出する関数
+// std::vector<cv::Rect> detectLightSource(const cv::Mat& gray)
+// {
+//     cv::Mat thresh;
+//     cv::threshold(gray, thresh, DETECTION_THRESHOLD, 255, cv::THRESH_BINARY);
+//     cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
+//     cv::morphologyEx(thresh, thresh, cv::MORPH_OPEN, kernel);
+//     cv::morphologyEx(thresh, thresh, cv::MORPH_CLOSE, kernel);
+
+//     // cv::namedWindow("Debug - Threshold View", cv::WINDOW_NORMAL);
+//     // cv::resizeWindow("Debug - Threshold View", 900, 1200);
+//     // cv::imshow("Debug - Threshold View", thresh);
+
+//     std::vector<std::vector<cv::Point>> contours;
+//     cv::findContours(thresh, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+    
+//     std::vector<cv::Rect> boxes;
+//     for (const auto& contour : contours)
+//     {
+//         double area = cv::contourArea(contour);
+//         if (area >= MIN_CONTOUR_AREA && area <= MAX_CONTOUR_AREA)
+//         {
+//             boxes.push_back(cv::boundingRect(contour));
+//         }
+//     }
+//     return boxes;
+// }
 
 int main(int argc, char *argv[])
 {
@@ -49,8 +148,8 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    cv::namedWindow("Detection View", cv::WINDOW_NORMAL);
-    cv::resizeWindow("Detection View", 900, 1200);
+    // cv::namedWindow("Detection View", cv::WINDOW_NORMAL);
+    // cv::resizeWindow("Detection View", 900, 1200);
     auto start_time = std::chrono::high_resolution_clock::now();
     std::list<Tracker> activeTrackers;
     cv::Mat frame;
@@ -118,7 +217,7 @@ int main(int argc, char *argv[])
             cv::putText(frame, "Tracker " + std::to_string(tracker.id), cv::Point(tracker.pos.x-10, tracker.pos.y-20), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
         }
 
-        cv::imshow("Detection View", frame);
+        // cv::imshow("Detection View", frame);
         if (cv::waitKey(1) == 27) break;
     }
 
