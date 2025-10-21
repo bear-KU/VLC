@@ -19,11 +19,15 @@ Tracker::Tracker(Tracker&& other) noexcept
     : id(other.id),
       pos(other.pos),
       miss_count(other.miss_count),
-      worker(std::move(other.worker)) {}
+      worker(std::move(other.worker)),
+      start_time(other.start_time),
+      end_time(other.end_time) {}
 
 // Trackerのムーブ代入演算子
-Tracker& Tracker::operator=(Tracker&& other) noexcept {
-    if (this != &other) {
+Tracker& Tracker::operator=(Tracker&& other) noexcept
+{
+    if (this != &other)
+    {
         if(worker.joinable())
         {
             worker.join();
@@ -33,12 +37,14 @@ Tracker& Tracker::operator=(Tracker&& other) noexcept {
         pos = other.pos;
         miss_count = other.miss_count;
         worker = std::move(other.worker);
+        start_time = other.start_time;
+        end_time = other.end_time;
     }
     return *this;
 }
 
 // 各トラッカーが実行するスレッド関数
-void trackerThreadFunction(int id, ThreadSafeQueue<FrameUpdate>* queue)
+void trackerThreadFunction(int id, ThreadSafeQueue<FrameUpdate>* queue, Tracker* tracker_ptr)
 {
     std::vector<std::pair<bool, int>> states;
     bool last_state_is_on = false;
@@ -74,11 +80,18 @@ void trackerThreadFunction(int id, ThreadSafeQueue<FrameUpdate>* queue)
         states.push_back({last_state_is_on, state_counter});
     }
 
+    // 終了時刻を記録
+    tracker_ptr->end_time = std::chrono::high_resolution_clock::now();
+    
     DecodeResult result = decodeFromStates(id, T_frames, states);
+    
+    // 処理時間を計算
+    std::chrono::duration<double> elapsed = tracker_ptr->end_time - tracker_ptr->start_time;
     
     {
         std::lock_guard<std::mutex> lock(cout_mutex);
         std::cout << "\n--- [Tracker " << id << "] 処理終了 ---" << std::endl;
+        std::cout << "処理時間: " << elapsed.count() << " 秒" << std::endl;
         std::cout << "点滅パターン: [ ";
         for (const auto& s : states) {
             std::cout << (s.first ? "1" : "0") << ":" << s.second << " ";
@@ -96,7 +109,8 @@ std::string binaryToAscii(const std::string& binary)
     std::string result;
     if (binary.empty()) return result;
     size_t parsable_length = binary.size() - (binary.size() % 8);
-    for (size_t i = 0; i < parsable_length; i += 8) {
+    for (size_t i = 0; i < parsable_length; i += 8)
+    {
         std::bitset<8> bits(binary.substr(i, 8));
         result += static_cast<char>(bits.to_ulong());
     }
@@ -110,9 +124,11 @@ DecodeResult decodeFromStates(int id, double& T_frames, const std::vector<std::p
     if (states.size() < 2) return result; // 状態が少なすぎる場合は終了
 
     int first_on_index = -1;
-    for (size_t i = 0; i < states.size(); ++i) {
+    for (size_t i = 0; i < states.size(); ++i)
+    {
         const auto& state = states[i];
-        if (state.first && state.second > 10) {
+        if (state.first && state.second > 10)
+        {
             T_frames = static_cast<double>(state.second) / 8.0;
             first_on_index = static_cast<int>(i);
             break;
@@ -121,7 +137,8 @@ DecodeResult decodeFromStates(int id, double& T_frames, const std::vector<std::p
 
     if (first_on_index == -1) return result;
 
-    for (size_t i = first_on_index + 1; i < states.size(); ++i) {
+    for (size_t i = first_on_index + 1; i < states.size(); ++i)
+    {
         const auto& state = states[i];
         if (!state.first) continue;
         double ratio = state.second / T_frames;

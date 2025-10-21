@@ -10,6 +10,7 @@
 #include <vector>
 #include <queue>
 #include <optional>
+#include <chrono>
 #include <opencv2/opencv.hpp>
 
 // スレッドセーフなキューの実装
@@ -62,15 +63,12 @@ struct Tracker
     cv::Point2f pos;
     int miss_count = 0;
 
-    // std::vector<std::pair<bool, int>> states;
-    // bool last_state_is_on = false;
-    // int state_counter = 0;
-    // bool finished = false;
-
-    // double T_frames = 0.0;
-
     std::thread worker;
     ThreadSafeQueue<FrameUpdate> frame_queue;
+    
+    // 時間計測用
+    std::chrono::high_resolution_clock::time_point start_time;
+    std::chrono::high_resolution_clock::time_point end_time;
 
     ~Tracker();
     Tracker(Tracker&& other) noexcept;
@@ -87,7 +85,7 @@ const double STATE_CHANGE_THRESHOLD = 150.0;
 extern std::mutex cout_mutex;
 
 // スレッドが実行する関数
-void trackerThreadFunction(int id, ThreadSafeQueue<FrameUpdate>* queue);
+void trackerThreadFunction(int id, ThreadSafeQueue<FrameUpdate>* queue, Tracker* tracker_ptr);
 
 // デコード関連の関数
 DecodeResult decodeFromStates(int id, double& T_frames, const std::vector<std::pair<bool, int>>& states);
