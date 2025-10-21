@@ -107,6 +107,9 @@ public:
     DetectorThreadPool(int image_rows, int image_cols)
     {
         num_threads_ = std::thread::hardware_concurrency();
+        // num_threads_ = 1;
+        // std::cout << "DetectorThreadPool: Using " << num_threads_ << " threads." << std::endl;
+
         tasks_.resize(num_threads_);
         worker_versions_.resize(num_threads_, 0);  // 全て0で初期化（task_version_も0から始まる）
         
@@ -215,34 +218,6 @@ void mergeOverlappingBoxes(std::vector<cv::Rect>& boxes)
     } while (merged);
 }
 
-// // フレームから明るい光源（LED）を検出する関数
-// std::vector<cv::Rect> detectLightSource(const cv::Mat& gray)
-// {
-//     cv::Mat thresh;
-//     cv::threshold(gray, thresh, DETECTION_THRESHOLD, 255, cv::THRESH_BINARY);
-//     cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
-//     cv::morphologyEx(thresh, thresh, cv::MORPH_OPEN, kernel);
-//     cv::morphologyEx(thresh, thresh, cv::MORPH_CLOSE, kernel);
-
-//     // cv::namedWindow("Debug - Threshold View", cv::WINDOW_NORMAL);
-//     // cv::resizeWindow("Debug - Threshold View", 900, 1200);
-//     // cv::imshow("Debug - Threshold View", thresh);
-
-//     std::vector<std::vector<cv::Point>> contours;
-//     cv::findContours(thresh, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-    
-//     std::vector<cv::Rect> boxes;
-//     for (const auto& contour : contours)
-//     {
-//         double area = cv::contourArea(contour);
-//         if (area >= MIN_CONTOUR_AREA && area <= MAX_CONTOUR_AREA)
-//         {
-//             boxes.push_back(cv::boundingRect(contour));
-//         }
-//     }
-//     return boxes;
-// }
-
 int main(int argc, char *argv[])
 {
     if (argc < 2) {
@@ -275,10 +250,10 @@ int main(int argc, char *argv[])
     // 最初のフレームに戻す
     cap.set(cv::CAP_PROP_POS_FRAMES, 0);
     
-    auto start_time = std::chrono::high_resolution_clock::now();
     std::list<Tracker> activeTrackers;
     cv::Mat frame;
-
+    
+    auto start_time = std::chrono::high_resolution_clock::now();
     while (true)
     {
         cap >> frame;
@@ -341,9 +316,9 @@ int main(int argc, char *argv[])
             {
                 activeTrackers.emplace_back(); // デフォルトコンストラクタで追加
                 Tracker& new_tracker_ref = activeTrackers.back();
+                new_tracker_ref.start_time = std::chrono::high_resolution_clock::now(); // 開始時刻を記録
                 new_tracker_ref.id = tracker_id_counter++;
                 new_tracker_ref.pos = cv::Point2f(detections[i].x + detections[i].width/2.0, detections[i].y + detections[i].height/2.0);
-                new_tracker_ref.start_time = std::chrono::high_resolution_clock::now(); // 開始時刻を記録
                 new_tracker_ref.worker = std::thread(trackerThreadFunction, new_tracker_ref.id, &new_tracker_ref.frame_queue, &new_tracker_ref);
             }
         }
@@ -357,12 +332,11 @@ int main(int argc, char *argv[])
         // cv::imshow("Detection View", frame);
         if (cv::waitKey(1) == 27) break;
     }
+    auto end_time = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end_time - start_time;
 
     std::cout << "\n--- 動画ファイルの再生が終了しました。残りのトラッカーを終了します ---" << std::endl;
     activeTrackers.clear(); // listがclearされる際に各Trackerのデストラクタが呼ばれる
-
-    auto end_time = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> elapsed = end_time - start_time;
     std::cout << "\n総解析時間: " << elapsed.count() << " 秒" << std::endl;
 
     cap.release();
