@@ -242,7 +242,7 @@ int main(int argc, char *argv[])
         std::cerr << "エラー: 動画ファイルから最初のフレームを取得できませんでした．" << std::endl;
         return -1;
     }
-    cv::flip(first_frame, first_frame, 0);
+    // cv::flip(first_frame, first_frame, 0);
     
     // スレッドプールを初期化（画像サイズを基に担当範囲を決定）
     DetectorThreadPool detector_pool(first_frame.rows, first_frame.cols);
@@ -257,7 +257,7 @@ int main(int argc, char *argv[])
     while (true)
     {
         cap >> frame;
-        cv::flip(frame, frame, 0); // 垂直反転
+        // cv::flip(frame, frame, 0); // 垂直反転
         if (frame.empty()) break;
         
         cv::Mat gray;
