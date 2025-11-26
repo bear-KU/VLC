@@ -4,8 +4,8 @@
 
 // --- メインスレッド側で使われる定数と変数 ---
 const double DETECTION_THRESHOLD = 230.0;
-const double MIN_CONTOUR_AREA = 10.0;
-const double MAX_CONTOUR_AREA = 1000.0;
+const double MIN_CONTOUR_AREA = 800.0;
+const double MAX_CONTOUR_AREA = 10000.0;
 const int MISS_COUNT_FOR_DELETION = 30;
 int tracker_id_counter = 0;
 
@@ -254,18 +254,53 @@ int main(int argc, char *argv[])
     cv::Mat frame;
     
     auto start_time = std::chrono::high_resolution_clock::now();
+    
+    /***********************************************************/
+    auto getting_frame_sum = 0.0;
+    auto detection_sum = 0.0;
+    auto tracking_sum = 0.0;
+    auto drawing_sum = 0.0;
+
+    std::chrono::high_resolution_clock::time_point getting_frame_start;
+    std::chrono::high_resolution_clock::time_point getting_frame_end;
+    std::chrono::high_resolution_clock::time_point detection_start;
+    std::chrono::high_resolution_clock::time_point detection_end;
+    std::chrono::high_resolution_clock::time_point tracking_start;
+    std::chrono::high_resolution_clock::time_point tracking_end;
+    std::chrono::high_resolution_clock::time_point drawing_start;
+    std::chrono::high_resolution_clock::time_point drawing_end;
+    /***********************************************************/
+
     while (true)
     {
+        /***********************************************************/
+        getting_frame_start = std::chrono::high_resolution_clock::now();
+        /***********************************************************/
+
         cap >> frame;
         // cv::flip(frame, frame, 0); // 垂直反転
         if (frame.empty()) break;
+
+        // imshow("Detection View", frame);
         
+        /***********************************************************/
+        getting_frame_end = std::chrono::high_resolution_clock::now();
+        getting_frame_sum += std::chrono::duration_cast<std::chrono::duration<double>>(getting_frame_end - getting_frame_start).count();
+        detection_start = std::chrono::high_resolution_clock::now();
+        /***********************************************************/
+
         cv::Mat gray;
         cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
         cv::GaussianBlur(gray, gray, cv::Size(5, 5), 0);
 
         std::vector<cv::Rect> detections = detector_pool.detect(gray);
         std::vector<bool> matched(detections.size(), false);
+
+        /***********************************************************/
+        detection_end = std::chrono::high_resolution_clock::now();
+        detection_sum += std::chrono::duration_cast<std::chrono::duration<double>>(detection_end - detection_start).count();
+        tracking_start = std::chrono::high_resolution_clock::now();
+        /***********************************************************/
 
         for (auto& tracker : activeTrackers)
         {
@@ -323,14 +358,27 @@ int main(int argc, char *argv[])
             }
         }
         
-        for (const auto &tracker : activeTrackers)
-        {
-            cv::rectangle(frame, cv::Point(tracker.pos.x-15, tracker.pos.y-15), cv::Point(tracker.pos.x+15, tracker.pos.y+15), cv::Scalar(0, 255, 0), 2);
-            cv::putText(frame, "Tracker " + std::to_string(tracker.id), cv::Point(tracker.pos.x-10, tracker.pos.y-20), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
-        }
+        /***********************************************************/
+        tracking_end = std::chrono::high_resolution_clock::now();
+        tracking_sum += std::chrono::duration_cast<std::chrono::duration<double>>(tracking_end - tracking_start).count();
+        // drawing_start = std::chrono::high_resolution_clock::now();
+        // /***********************************************************/
 
+        // for (const auto &tracker : activeTrackers)
+        // {
+        //     cv::rectangle(frame, cv::Point(tracker.pos.x-15, tracker.pos.y-15), cv::Point(tracker.pos.x+15, tracker.pos.y+15), cv::Scalar(0, 255, 0), 2);
+        //     cv::putText(frame, "Tracker " + std::to_string(tracker.id), cv::Point(tracker.pos.x-10, tracker.pos.y-20), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
+        // }
+
+        // /***********************************************************/
+        // drawing_end = std::chrono::high_resolution_clock::now();
+        // drawing_sum += std::chrono::duration_cast<std::chrono::duration<double>>(drawing_end - drawing_start).count();
+        /***********************************************************/
+
+        // cv::rotate(frame, frame, cv::ROTATE_90_CLOCKWISE);
         // cv::imshow("Detection View", frame);
         if (cv::waitKey(1) == 27) break;
+
     }
     auto end_time = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed = end_time - start_time;
@@ -338,6 +386,14 @@ int main(int argc, char *argv[])
     std::cout << "\n--- 動画ファイルの再生が終了しました。残りのトラッカーを終了します ---" << std::endl;
     activeTrackers.clear(); // listがclearされる際に各Trackerのデストラクタが呼ばれる
     std::cout << "\n総解析時間: " << elapsed.count() << " 秒" << std::endl;
+
+    /***********************************************************/
+    std::cout << "フレーム取得時間合計: " << getting_frame_sum << " 秒" << std::endl;
+    std::cout << "検出処理時間合計: " << detection_sum << " 秒" << std::endl;
+    std::cout << "追跡処理時間合計: " << tracking_sum << " 秒" << std::endl;
+    std::cout << "描画処理時間合計: " << drawing_sum << " 秒" << std::endl;
+    std::cout << "合計時間: " << (detection_sum + tracking_sum) << " 秒" << std::endl;
+    /***********************************************************/
 
     cap.release();
     cv::destroyAllWindows();
