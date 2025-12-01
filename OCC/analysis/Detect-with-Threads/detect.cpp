@@ -1,4 +1,5 @@
 #include "tracker_thread.hpp"
+#include "read_frame.hpp"
 #include <list> // std::listを使用
 #include <atomic>
 
@@ -224,34 +225,55 @@ int main(int argc, char *argv[])
         std::cerr << "エラー: 動画ファイルのパスを指定してください．" << std::endl;
         return -1;
     }
-    std::string video_path = argv[1];
-    cv::VideoCapture cap(video_path);
-    if (!cap.isOpened()) {
-        std::cerr << "エラー: 動画ファイル '" << video_path << "' を開けませんでした．" << std::endl;
+
+    const char* video_path = argv[1];
+
+    AVFormatContext *fmt_ctx = nullptr;
+    int video_stream_idx = -1;
+    AVCodecContext *dec_ctx = nullptr;
+
+    if (!open_video(video_path, &fmt_ctx, &video_stream_idx)) {
+        return -1;
+    }
+
+    if (!open_codec(fmt_ctx, video_stream_idx, &dec_ctx)) {
+        avformat_close_input(&fmt_ctx);
+        return -1;
+    }
+
+    AVPacket *packet = av_packet_alloc();
+    AVFrame *frame = av_frame_alloc();
+    if (!packet || !frame) {
+        std::cerr << "Failed to allocate packet or frame\n";
+        avcodec_free_context(&dec_ctx);
+        avformat_close_input(&fmt_ctx);
+        return -1;
+    }
+
+    // フレーム用のメモリの確保
+    // 縦 * 横 * RGB だけ
+    cv::Mat cv_frame;
+    prepare_buffer(dec_ctx, cv_frame);
+    
+    // YUV -> BGR変換(OpenCV は BGR フォーマットを使用)の準備
+    // 幅・高さは変更しないため元サイズで指定
+    SwsContext *sws_ctx = create_sws_context(dec_ctx);
+    if (!sws_ctx) {
+        std::cerr << "Failed to create SwsContext\n";
+        av_frame_free(&frame);
+        av_packet_free(&packet);
+        avcodec_free_context(&dec_ctx);
+        avformat_close_input(&fmt_ctx);
         return -1;
     }
 
     // cv::namedWindow("Detection View", cv::WINDOW_NORMAL);
     // cv::resizeWindow("Detection View", 900, 1200);
-    
-    // 最初のフレームを読んで画像サイズを取得
-    cv::Mat first_frame;
-    cap >> first_frame;
-    if (first_frame.empty())
-    {
-        std::cerr << "エラー: 動画ファイルから最初のフレームを取得できませんでした．" << std::endl;
-        return -1;
-    }
-    // cv::flip(first_frame, first_frame, 0);
-    
+        
     // スレッドプールを初期化（画像サイズを基に担当範囲を決定）
-    DetectorThreadPool detector_pool(first_frame.rows, first_frame.cols);
-    
-    // 最初のフレームに戻す
-    cap.set(cv::CAP_PROP_POS_FRAMES, 0);
-    
+    DetectorThreadPool detector_pool(dec_ctx->height, dec_ctx->width);
+        
     std::list<Tracker> activeTrackers;
-    cv::Mat frame;
     
     auto start_time = std::chrono::high_resolution_clock::now();
     
@@ -271,15 +293,18 @@ int main(int argc, char *argv[])
     std::chrono::high_resolution_clock::time_point drawing_end;
     /***********************************************************/
 
+    bool ret;
+    int frame_count = 0;
     while (true)
     {
         /***********************************************************/
         getting_frame_start = std::chrono::high_resolution_clock::now();
         /***********************************************************/
 
-        cap >> frame;
-        // cv::flip(frame, frame, 0); // 垂直反転
-        if (frame.empty()) break;
+        ret = read_frame(fmt_ctx, dec_ctx, video_stream_idx, sws_ctx, packet, frame, cv_frame);
+        if (!ret) {
+            break; // 映像終了またはエラー
+        }
 
         // imshow("Detection View", frame);
         
@@ -290,7 +315,7 @@ int main(int argc, char *argv[])
         /***********************************************************/
 
         cv::Mat gray;
-        cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+        cv::cvtColor(cv_frame, gray, cv::COLOR_BGR2GRAY);
         cv::GaussianBlur(gray, gray, cv::Size(5, 5), 0);
 
         std::vector<cv::Rect> detections = detector_pool.detect(gray);
@@ -378,7 +403,7 @@ int main(int argc, char *argv[])
         // cv::rotate(frame, frame, cv::ROTATE_90_CLOCKWISE);
         // cv::imshow("Detection View", frame);
         if (cv::waitKey(1) == 27) break;
-
+        frame_count++;
     }
     auto end_time = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed = end_time - start_time;
@@ -388,14 +413,14 @@ int main(int argc, char *argv[])
     std::cout << "\n総解析時間: " << elapsed.count() << " 秒" << std::endl;
 
     /***********************************************************/
+    std::cout << "総フレーム数: " << frame_count << std::endl;
     std::cout << "フレーム取得時間合計: " << getting_frame_sum << " 秒" << std::endl;
     std::cout << "検出処理時間合計: " << detection_sum << " 秒" << std::endl;
     std::cout << "追跡処理時間合計: " << tracking_sum << " 秒" << std::endl;
     std::cout << "描画処理時間合計: " << drawing_sum << " 秒" << std::endl;
-    std::cout << "合計時間: " << (detection_sum + tracking_sum) << " 秒" << std::endl;
+    std::cout << "合計時間: " << (getting_frame_sum + detection_sum + tracking_sum) << " 秒" << std::endl;
     /***********************************************************/
 
-    cap.release();
     cv::destroyAllWindows();
     return 0;
 }
