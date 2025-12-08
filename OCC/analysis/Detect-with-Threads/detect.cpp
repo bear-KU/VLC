@@ -6,7 +6,7 @@
 // --- メインスレッド側で使われる定数と変数 ---
 const double DETECTION_THRESHOLD = 230.0;
 const double MIN_CONTOUR_AREA = 800.0;
-const double MAX_CONTOUR_AREA = 10000.0;
+const double MAX_CONTOUR_AREA = 100000.0;
 const int MISS_COUNT_FOR_DELETION = 30;
 int tracker_id_counter = 0;
 
@@ -389,10 +389,14 @@ int main(int argc, char *argv[])
         // drawing_start = std::chrono::high_resolution_clock::now();
         // /***********************************************************/
 
+        // cv::Mat display_frame;
+        // cv_frame.copyTo(display_frame);
         // for (const auto &tracker : activeTrackers)
         // {
-        //     cv::rectangle(frame, cv::Point(tracker.pos.x-15, tracker.pos.y-15), cv::Point(tracker.pos.x+15, tracker.pos.y+15), cv::Scalar(0, 255, 0), 2);
-        //     cv::putText(frame, "Tracker " + std::to_string(tracker.id), cv::Point(tracker.pos.x-10, tracker.pos.y-20), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
+        //     int cx = static_cast<int>(std::round(tracker.pos.x));
+        //     int cy = static_cast<int>(std::round(tracker.pos.y));
+        //     cv::rectangle(display_frame, cv::Point(tracker.pos.x-15, tracker.pos.y-15), cv::Point(tracker.pos.x+15, tracker.pos.y+15), cv::Scalar(0, 255, 0), 2);
+        //     cv::putText(display_frame, "Tracker " + std::to_string(tracker.id), cv::Point(tracker.pos.x-10, tracker.pos.y-20), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
         // }
 
         // /***********************************************************/
@@ -400,9 +404,9 @@ int main(int argc, char *argv[])
         // drawing_sum += std::chrono::duration_cast<std::chrono::duration<double>>(drawing_end - drawing_start).count();
         /***********************************************************/
 
-        // cv::rotate(frame, frame, cv::ROTATE_90_CLOCKWISE);
-        // cv::imshow("Detection View", frame);
-        if (cv::waitKey(1) == 27) break;
+        // cv::rotate(display_frame, display_frame, cv::ROTATE_90_CLOCKWISE);
+        // cv::imshow("Detection View", display_frame);
+        // if (cv::waitKey(1) == 27) break;
         frame_count++;
     }
     auto end_time = std::chrono::high_resolution_clock::now();

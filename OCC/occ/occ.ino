@@ -10,11 +10,13 @@ void setup()
     // wait for serial port to connect. Needed for native USB
   }
 
+  delay(3000);
+
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
   delay(1000);
 
-  String data = "Hello, world!";
+  String data = "Hello, world from esp32!";
   led_signal(data);
 }
 
