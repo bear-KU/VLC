@@ -50,7 +50,9 @@ void trackerThreadFunction(int id, ThreadSafeQueue<FrameUpdate>* queue, Tracker*
     bool last_state_is_on = false;
     int state_counter = 0;
     double T_frames = 0.0;
-    bool is_rejected = false;
+
+    std::vector<double> areas;
+    const int AREA_COUNT = 5;
 
     while (true)
     {
@@ -60,6 +62,11 @@ void trackerThreadFunction(int id, ThreadSafeQueue<FrameUpdate>* queue, Tracker*
         FrameUpdate update = update_opt.value();
 
         if (update.terminate) break;
+
+        if (update.found && areas.size() < AREA_COUNT)
+        {
+            areas.push_back(update.area);
+        }
 
         bool current_state_is_on = update.found && (update.intensity > STATE_CHANGE_THRESHOLD);
 
@@ -88,6 +95,10 @@ void trackerThreadFunction(int id, ThreadSafeQueue<FrameUpdate>* queue, Tracker*
     // 処理時間を計算
     std::chrono::duration<double> elapsed = tracker_ptr->end_time - tracker_ptr->start_time;
     
+    double area_sum = 0.0;
+    for (double a : areas) area_sum += a;
+    double avg_area = (!areas.empty()) ? (area_sum / areas.size()) : 0.0;
+
     {
         std::lock_guard<std::mutex> lock(cout_mutex);
         std::cout << "\n--- [Tracker " << id << "] 処理終了 ---" << std::endl;
@@ -100,6 +111,13 @@ void trackerThreadFunction(int id, ThreadSafeQueue<FrameUpdate>* queue, Tracker*
         std::cout << "基準時間 T: " << T_frames << " フレーム" << std::endl;
         std::cout << "デコード結果 -> bits:  [" << result.bits << "]" << std::endl;
         std::cout << "デコード結果 -> ascii: [" << result.ascii << "]" << std::endl;
+
+        std::cout << "検出面積一覧: [ ";
+        for (double a : areas) {
+            std::cout << a << " ";
+        }
+        std::cout << "]" << std::endl;
+        std::cout << "平均検出面積: " << avg_area << std::endl;
     }
 }
 

@@ -267,8 +267,8 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    // cv::namedWindow("Detection View", cv::WINDOW_NORMAL);
-    // cv::resizeWindow("Detection View", 900, 1200);
+    cv::namedWindow("Detection View", cv::WINDOW_NORMAL);
+    cv::resizeWindow("Detection View", 900, 1200);
         
     // スレッドプールを初期化（画像サイズを基に担当範囲を決定）
     DetectorThreadPool detector_pool(dec_ctx->height, dec_ctx->width);
@@ -346,16 +346,22 @@ int main(int argc, char *argv[])
             if (best_index != -1) 
             {
                 tracker.pos = cv::Point2f(detections[best_index].x + detections[best_index].width/2.0, detections[best_index].y + detections[best_index].height/2.0);
+                
+                tracker.size = detections[best_index].size();
+
                 tracker.miss_count = 0;
                 matched[best_index] = true;
                 int x = std::clamp((int)tracker.pos.x, 0, gray.cols - 1);
                 int y = std::clamp((int)tracker.pos.y, 0, gray.rows - 1);
-                tracker.frame_queue.push({false, true, gray.at<uchar>(y, x)});
+
+                double area = detections[best_index].area();
+
+                tracker.frame_queue.push({false, true, gray.at<uchar>(y, x), tracker.pos, area});
             }
             else
             {
                 tracker.miss_count++;
-                tracker.frame_queue.push({false, false, 0});
+                tracker.frame_queue.push({false, false, 0, tracker.pos, 0.0});
             }
         }
 
@@ -379,6 +385,9 @@ int main(int argc, char *argv[])
                 new_tracker_ref.start_time = std::chrono::high_resolution_clock::now(); // 開始時刻を記録
                 new_tracker_ref.id = tracker_id_counter++;
                 new_tracker_ref.pos = cv::Point2f(detections[i].x + detections[i].width/2.0, detections[i].y + detections[i].height/2.0);
+
+                new_tracker_ref.size = detections[i].size();
+
                 new_tracker_ref.worker = std::thread(trackerThreadFunction, new_tracker_ref.id, &new_tracker_ref.frame_queue, &new_tracker_ref);
             }
         }
@@ -389,15 +398,20 @@ int main(int argc, char *argv[])
         // drawing_start = std::chrono::high_resolution_clock::now();
         // /***********************************************************/
 
-        // cv::Mat display_frame;
-        // cv_frame.copyTo(display_frame);
-        // for (const auto &tracker : activeTrackers)
-        // {
-        //     int cx = static_cast<int>(std::round(tracker.pos.x));
-        //     int cy = static_cast<int>(std::round(tracker.pos.y));
-        //     cv::rectangle(display_frame, cv::Point(tracker.pos.x-15, tracker.pos.y-15), cv::Point(tracker.pos.x+15, tracker.pos.y+15), cv::Scalar(0, 255, 0), 2);
-        //     cv::putText(display_frame, "Tracker " + std::to_string(tracker.id), cv::Point(tracker.pos.x-10, tracker.pos.y-20), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
-        // }
+        cv::Mat display_frame;
+        cv_frame.copyTo(display_frame);
+        for (const auto &tracker : activeTrackers)
+        {
+            // int cx = static_cast<int>(std::round(tracker.pos.x));
+            // int cy = static_cast<int>(std::round(tracker.pos.y));
+            // cv::rectangle(display_frame, cv::Point(tracker.pos.x-15, tracker.pos.y-15), cv::Point(tracker.pos.x+15, tracker.pos.y+15), cv::Scalar(0, 255, 0), 2);
+
+            cv::Point2f top_left = tracker.pos - cv::Point2f(tracker.size.width/2.0f, tracker.size.height/2.0f);
+            cv::Rect rect(static_cast<int>(top_left.x), static_cast<int>(top_left.y), tracker.size.width, tracker.size.height);
+            cv::rectangle(display_frame, rect, cv::Scalar(0, 255, 0), 2);
+
+            cv::putText(display_frame, "Tracker " + std::to_string(tracker.id), cv::Point(tracker.pos.x-10, tracker.pos.y-20), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
+        }
 
         // /***********************************************************/
         // drawing_end = std::chrono::high_resolution_clock::now();
@@ -405,8 +419,8 @@ int main(int argc, char *argv[])
         /***********************************************************/
 
         // cv::rotate(display_frame, display_frame, cv::ROTATE_90_CLOCKWISE);
-        // cv::imshow("Detection View", display_frame);
-        // if (cv::waitKey(1) == 27) break;
+        cv::imshow("Detection View", display_frame);
+        if (cv::waitKey(1) == 27) break;
         frame_count++;
     }
     auto end_time = std::chrono::high_resolution_clock::now();

@@ -47,6 +47,7 @@ struct FrameUpdate
     bool found = false;
     int intensity = 0;
     cv::Point2f pos;
+    double area = 0.0;
 };
 
 // デコード結果を保持する構造体
@@ -62,6 +63,8 @@ struct Tracker
     int id;
     cv::Point2f pos;
     int miss_count = 0;
+
+    cv::Size size;
 
     std::thread worker;
     ThreadSafeQueue<FrameUpdate> frame_queue;
