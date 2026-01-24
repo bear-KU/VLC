@@ -2,18 +2,70 @@
 #include "read_frame.hpp"
 #include <list> // std::listを使用
 #include <atomic>
+#include <algorithm> // std::remove_ifのために追加
 
 // --- メインスレッド側で使われる定数と変数 ---
-const double DETECTION_THRESHOLD = 230.0;
-const double MIN_CONTOUR_AREA = 800.0;
+const double DETECTION_THRESHOLD = 200.0;
+
+// [MOD] 最終的に必要な面積（マージ後の判定用）
+const double MIN_CONTOUR_AREA = 200.0;
+
+// [ADD] スレッド内での仮フィルタ用（ノイズ除去用）
+// 分割された「破片」も通過させるため、十分に小さく設定する
+const double MIN_FRAGMENT_AREA = 50.0; 
+
 const double MAX_CONTOUR_AREA = 100000.0;
-const int MISS_COUNT_FOR_DELETION = 30;
+const int MISS_COUNT_FOR_DELETION = 50; // トラッカー削除までの許容ミスフレーム数(調整必要)
 int tracker_id_counter = 0;
 
 std::mutex boxes_mutex;
 
+// =======================
+// [ADD] Detection 構造体
+// =======================
+struct Detection
+{
+    cv::Rect box;
+    double area; // contour union area
+    std::vector<std::vector<cv::Point>> contours;
+};
+
 // 前方宣言
-void mergeOverlappingBoxes(std::vector<cv::Rect>& boxes);
+void mergeOverlappingDetections(std::vector<Detection>& detections);
+
+// =======================
+// [ADD] contour 和集合面積
+// =======================
+double computeUnionContourArea(
+    const std::vector<std::vector<cv::Point>>& contours)
+{
+    if (contours.empty()) return 0.0;
+
+    // --- [FIX] 全 contour の点を 1 つにまとめる ---
+    std::vector<cv::Point> all_points;
+    for (const auto& c : contours)
+    {
+        all_points.insert(all_points.end(), c.begin(), c.end());
+    }
+
+    if (all_points.empty()) return 0.0;
+
+    cv::Rect bbox = cv::boundingRect(all_points);
+    cv::Mat mask = cv::Mat::zeros(bbox.height, bbox.width, CV_8UC1);
+
+    for (const auto& c : contours)
+    {
+        std::vector<std::vector<cv::Point>> shifted{c};
+        for (auto& p : shifted[0])
+        {
+            p -= bbox.tl();
+        }
+        cv::drawContours(mask, shifted, -1, cv::Scalar(255), cv::FILLED);
+    }
+
+    return static_cast<double>(cv::countNonZero(mask));
+}
+
 
 // スレッドプール用のクラス
 class DetectorThreadPool
@@ -23,7 +75,7 @@ private:
     {
         cv::Rect roi;
         const cv::Mat* gray_ptr;
-        std::vector<cv::Rect>* results_ptr;
+        std::vector<Detection>* results_ptr; // [MOD]
     };
 
     int num_threads_;
@@ -58,7 +110,7 @@ private:
             }
 
             // 検出処理（ロックなし）
-            std::vector<cv::Rect> local_boxes;
+            std::vector<Detection> local_detections;
             cv::Mat sub_gray = (*task.gray_ptr)(task.roi);
 
             cv::Mat thresh;
@@ -70,23 +122,42 @@ private:
             std::vector<std::vector<cv::Point>> contours;
             cv::findContours(thresh, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
             
-            for (const auto& contour : contours)
+            // オフセット座標（ROIの左上座標）
+            cv::Point offset_point(task.roi.x, task.roi.y);
+
+            for (auto& contour : contours)
             {
                 double area = cv::contourArea(contour);
-                if (area >= MIN_CONTOUR_AREA && area <= MAX_CONTOUR_AREA)
+                
+                // [MOD] 分割された破片も拾うため、ここでは小さい閾値(MIN_FRAGMENT_AREA)を使用
+                if (area >= MIN_FRAGMENT_AREA && area <= MAX_CONTOUR_AREA)
                 {
-                    cv::Rect box = cv::boundingRect(contour);
-                    box.x += task.roi.x;
-                    box.y += task.roi.y;
-                    local_boxes.push_back(box);
+                    Detection det;
+
+                    // [FIX] 輪郭の座標を「グローバル座標」に変換して保存する
+                    // これを行わないと、マージ後に形状が壊れ、面積が正しく計算されません
+                    for (auto& p : contour)
+                    {
+                        p += offset_point;
+                    }
+                    det.contours.push_back(contour);
+
+                    // バウンディングボックスも変換後のcontourから計算（グローバル座標になる）
+                    det.box = cv::boundingRect(contour);
+                    
+                    det.area = area;
+                    local_detections.push_back(det);
                 }
             }
 
             // 結果をマージ
-            if (!local_boxes.empty())
+            if (!local_detections.empty())
             {
                 std::lock_guard<std::mutex> lock(boxes_mutex);
-                task.results_ptr->insert(task.results_ptr->end(), local_boxes.begin(), local_boxes.end());
+                task.results_ptr->insert(
+                    task.results_ptr->end(),
+                    local_detections.begin(),
+                    local_detections.end());
             }
 
             // 完了を記録
@@ -108,16 +179,13 @@ public:
     DetectorThreadPool(int image_rows, int image_cols)
     {
         num_threads_ = std::thread::hardware_concurrency();
-        // num_threads_ = 1;
-        // std::cout << "DetectorThreadPool: Using " << num_threads_ << " threads." << std::endl;
 
         tasks_.resize(num_threads_);
-        worker_versions_.resize(num_threads_, 0);  // 全て0で初期化（task_version_も0から始まる）
+        worker_versions_.resize(num_threads_, 0);
         
         const int slice_height = image_rows / num_threads_;
         const int overlap = 20;
 
-        // 各スレッドの担当範囲を計算
         for (int i = 0; i < num_threads_; ++i)
         {
             int y_start = i * slice_height;
@@ -128,7 +196,6 @@ public:
             tasks_[i].roi = cv::Rect(0, roi_y_start, image_cols, roi_y_end - roi_y_start);
         }
 
-        // ワーカースレッドを起動
         for (int i = 0; i < num_threads_; ++i)
         {
             workers_.emplace_back(&DetectorThreadPool::worker_loop, this, i);
@@ -149,11 +216,10 @@ public:
         }
     }
 
-    std::vector<cv::Rect> detect(const cv::Mat& gray)
+    std::vector<Detection> detect(const cv::Mat& gray)
     {
-        std::vector<cv::Rect> results;
+        std::vector<Detection> results;
         
-        // タスクを設定
         {
             std::lock_guard<std::mutex> lock(mtx_);
             for (int i = 0; i < num_threads_; ++i)
@@ -162,13 +228,11 @@ public:
                 tasks_[i].results_ptr = &results;
             }
             completed_count_ = 0;
-            task_version_++;  // バージョンをインクリメント
+            task_version_++;
         }
 
-        // ワーカーを起動
         cv_start_.notify_all();
 
-        // 完了を待つ
         {
             std::unique_lock<std::mutex> lock(mtx_);
             cv_done_.wait(lock, [this] { 
@@ -176,48 +240,60 @@ public:
             });
         }
 
-        // 重複をマージ
         if (!results.empty())
         {
-            mergeOverlappingBoxes(results);
+            // 1. 重なっている部分を結合（ここで面積も再計算される）
+            mergeOverlappingDetections(results);
+
+            // 2. [ADD] 結合後の面積が MIN_CONTOUR_AREA 未満のものを削除
+            // これにより、分割されていたが合体して十分な大きさになったものは残り、
+            // 合体しても小さいゴミはここで削除される。
+            auto it = std::remove_if(results.begin(), results.end(),
+                [](const Detection& d) {
+                    return d.area < MIN_CONTOUR_AREA;
+                });
+            results.erase(it, results.end());
         }
 
         return results;
     }
 };
 
-// 重なった領域をマージする関数
-void mergeOverlappingBoxes(std::vector<cv::Rect>& boxes)
+// =======================
+// [MOD] Detection 結合
+// =======================
+void mergeOverlappingDetections(std::vector<Detection>& detections)
 {
-    if (boxes.empty())
-    {
-        return;
-    }
-
     bool merged;
-    do 
+    do
     {
         merged = false;
-        for (size_t i = 0; i < boxes.size(); ++i)
+        for (size_t i = 0; i < detections.size(); ++i)
         {
-            for (size_t j = i + 1; j < boxes.size(); ++j)
+            for (size_t j = i + 1; j < detections.size(); ++j)
             {
-                // 2つの矩形の共通領域を計算
-                cv::Rect intersection = boxes[i] & boxes[j];
-
-                // 重なっている場合
-                if (intersection.area() > 0)
+                if ((detections[i].box & detections[j].box).area() > 0)
                 {
-                    boxes[i] |= boxes[j];                    
-                    boxes.erase(boxes.begin() + j);
-                    --j;
-                    
+                    detections[i].box |= detections[j].box;
+
+                    detections[i].contours.insert(
+                        detections[i].contours.end(),
+                        detections[j].contours.begin(),
+                        detections[j].contours.end());
+
+                    detections[i].area =
+                        computeUnionContourArea(detections[i].contours);
+
+                    detections.erase(detections.begin() + j);
                     merged = true;
+                    break;
                 }
             }
+            if (merged) break;
         }
     } while (merged);
 }
+
 
 int main(int argc, char *argv[])
 {
@@ -267,8 +343,12 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+#ifdef ENABLE_GUI
+    // cv::namedWindow("gray", cv::WINDOW_NORMAL);
+    // cv::resizeWindow("gray", 900, 1200);
     cv::namedWindow("Detection View", cv::WINDOW_NORMAL);
     cv::resizeWindow("Detection View", 900, 1200);
+#endif
         
     // スレッドプールを初期化（画像サイズを基に担当範囲を決定）
     DetectorThreadPool detector_pool(dec_ctx->height, dec_ctx->width);
@@ -282,6 +362,7 @@ int main(int argc, char *argv[])
     auto detection_sum = 0.0;
     auto tracking_sum = 0.0;
     auto drawing_sum = 0.0;
+    auto wait_sum = 0.0;
 
     std::chrono::high_resolution_clock::time_point getting_frame_start;
     std::chrono::high_resolution_clock::time_point getting_frame_end;
@@ -291,6 +372,8 @@ int main(int argc, char *argv[])
     std::chrono::high_resolution_clock::time_point tracking_end;
     std::chrono::high_resolution_clock::time_point drawing_start;
     std::chrono::high_resolution_clock::time_point drawing_end;
+    std::chrono::high_resolution_clock::time_point wait_start;
+    std::chrono::high_resolution_clock::time_point wait_end;
     /***********************************************************/
 
     bool ret;
@@ -305,8 +388,6 @@ int main(int argc, char *argv[])
         if (!ret) {
             break; // 映像終了またはエラー
         }
-
-        // imshow("Detection View", frame);
         
         /***********************************************************/
         getting_frame_end = std::chrono::high_resolution_clock::now();
@@ -318,7 +399,15 @@ int main(int argc, char *argv[])
         cv::cvtColor(cv_frame, gray, cv::COLOR_BGR2GRAY);
         cv::GaussianBlur(gray, gray, cv::Size(5, 5), 0);
 
-        std::vector<cv::Rect> detections = detector_pool.detect(gray);
+        // // DEBUG: 二値画像描画
+        // cv::Mat thresh;
+        // cv::threshold(gray, thresh, DETECTION_THRESHOLD, 255, cv::THRESH_BINARY);
+        // cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
+        // cv::morphologyEx(thresh, thresh, cv::MORPH_OPEN, kernel);
+        // cv::morphologyEx(thresh, thresh, cv::MORPH_CLOSE, kernel);
+        // cv::imshow("gray", thresh);
+
+        std::vector<Detection> detections = detector_pool.detect(gray);
         std::vector<bool> matched(detections.size(), false);
 
         /***********************************************************/
@@ -334,7 +423,7 @@ int main(int argc, char *argv[])
             for (size_t i = 0; i < detections.size(); ++i)
             {
                 if (matched[i]) continue;
-                cv::Point2f center(detections[i].x + detections[i].width/2.0, detections[i].y + detections[i].height/2.0);
+                cv::Point2f center(detections[i].box.x + detections[i].box.width/2.0, detections[i].box.y + detections[i].box.height/2.0);
                 double dist = cv::norm(tracker.pos - center);
                 if (dist < best_dist)
                 {
@@ -345,16 +434,16 @@ int main(int argc, char *argv[])
            
             if (best_index != -1) 
             {
-                tracker.pos = cv::Point2f(detections[best_index].x + detections[best_index].width/2.0, detections[best_index].y + detections[best_index].height/2.0);
+                tracker.pos = cv::Point2f(detections[best_index].box.x + detections[best_index].box.width/2.0, detections[best_index].box.y + detections[best_index].box.height/2.0);
                 
-                tracker.size = detections[best_index].size();
+                tracker.size = detections[best_index].box.size();
 
                 tracker.miss_count = 0;
                 matched[best_index] = true;
                 int x = std::clamp((int)tracker.pos.x, 0, gray.cols - 1);
                 int y = std::clamp((int)tracker.pos.y, 0, gray.rows - 1);
 
-                double area = detections[best_index].area();
+                double area = detections[best_index].area;
 
                 tracker.frame_queue.push({false, true, gray.at<uchar>(y, x), tracker.pos, area});
             }
@@ -384,9 +473,9 @@ int main(int argc, char *argv[])
                 Tracker& new_tracker_ref = activeTrackers.back();
                 new_tracker_ref.start_time = std::chrono::high_resolution_clock::now(); // 開始時刻を記録
                 new_tracker_ref.id = tracker_id_counter++;
-                new_tracker_ref.pos = cv::Point2f(detections[i].x + detections[i].width/2.0, detections[i].y + detections[i].height/2.0);
+                new_tracker_ref.pos = cv::Point2f(detections[i].box.x + detections[i].box.width/2.0, detections[i].box.y + detections[i].box.height/2.0);
 
-                new_tracker_ref.size = detections[i].size();
+                new_tracker_ref.size = detections[i].box.size();
 
                 new_tracker_ref.worker = std::thread(trackerThreadFunction, new_tracker_ref.id, &new_tracker_ref.frame_queue, &new_tracker_ref);
             }
@@ -395,32 +484,63 @@ int main(int argc, char *argv[])
         /***********************************************************/
         tracking_end = std::chrono::high_resolution_clock::now();
         tracking_sum += std::chrono::duration_cast<std::chrono::duration<double>>(tracking_end - tracking_start).count();
-        // drawing_start = std::chrono::high_resolution_clock::now();
+        drawing_start = std::chrono::high_resolution_clock::now();
         // /***********************************************************/
 
+#ifdef ENABLE_GUI
         cv::Mat display_frame;
         cv_frame.copyTo(display_frame);
+
+        // for (const auto &tracker : activeTrackers)
+        // {
+        //     // int cx = static_cast<int>(std::round(tracker.pos.x));
+        //     // int cy = static_cast<int>(std::round(tracker.pos.y));
+        //     // cv::rectangle(display_frame, cv::Point(tracker.pos.x-15, tracker.pos.y-15), cv::Point(tracker.pos.x+15, tracker.pos.y+15), cv::Scalar(0, 255, 0), 2);
+
+        //     cv::Point2f top_left = tracker.pos - cv::Point2f(tracker.size.width/2.0f, tracker.size.height/2.0f);
+        //     cv::Rect rect(static_cast<int>(top_left.x), static_cast<int>(top_left.y), tracker.size.width, tracker.size.height);
+        //     cv::rectangle(display_frame, rect, cv::Scalar(0, 255, 0), 2);
+
+        //     cv::putText(display_frame, "Tracker " + std::to_string(tracker.id), cv::Point(tracker.pos.x-10, tracker.pos.y-20), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
+        // }
+
         for (const auto &tracker : activeTrackers)
         {
-            // int cx = static_cast<int>(std::round(tracker.pos.x));
-            // int cy = static_cast<int>(std::round(tracker.pos.y));
-            // cv::rectangle(display_frame, cv::Point(tracker.pos.x-15, tracker.pos.y-15), cv::Point(tracker.pos.x+15, tracker.pos.y+15), cv::Scalar(0, 255, 0), 2);
+            cv::Point2f top_left = tracker.pos - cv::Point2f(tracker.size.width / 2.0f, tracker.size.height / 2.0f);
+            
+            cv::Rect rect(
+                static_cast<int>(top_left.x), 
+                static_cast<int>(top_left.y), 
+                tracker.size.width, 
+                tracker.size.height
+            );
 
-            cv::Point2f top_left = tracker.pos - cv::Point2f(tracker.size.width/2.0f, tracker.size.height/2.0f);
-            cv::Rect rect(static_cast<int>(top_left.x), static_cast<int>(top_left.y), tracker.size.width, tracker.size.height);
             cv::rectangle(display_frame, rect, cv::Scalar(0, 255, 0), 2);
 
-            cv::putText(display_frame, "Tracker " + std::to_string(tracker.id), cv::Point(tracker.pos.x-10, tracker.pos.y-20), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
+            cv::putText(display_frame, "Tracker " + std::to_string(tracker.id), 
+                        cv::Point(rect.x, rect.y - 5), 
+                        cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
         }
 
+#endif
         // /***********************************************************/
-        // drawing_end = std::chrono::high_resolution_clock::now();
-        // drawing_sum += std::chrono::duration_cast<std::chrono::duration<double>>(drawing_end - drawing_start).count();
+        drawing_end = std::chrono::high_resolution_clock::now();
+        drawing_sum += std::chrono::duration_cast<std::chrono::duration<double>>(drawing_end - drawing_start).count();
         /***********************************************************/
 
+        
+        wait_start = std::chrono::high_resolution_clock::now();
+
+#ifdef ENABLE_GUI
         // cv::rotate(display_frame, display_frame, cv::ROTATE_90_CLOCKWISE);
+
         cv::imshow("Detection View", display_frame);
         if (cv::waitKey(1) == 27) break;
+#endif
+
+        wait_end = std::chrono::high_resolution_clock::now();
+        wait_sum += std::chrono::duration_cast<std::chrono::duration<double>>(wait_end - wait_start).count();
+        
         frame_count++;
     }
     auto end_time = std::chrono::high_resolution_clock::now();
@@ -436,6 +556,7 @@ int main(int argc, char *argv[])
     std::cout << "検出処理時間合計: " << detection_sum << " 秒" << std::endl;
     std::cout << "追跡処理時間合計: " << tracking_sum << " 秒" << std::endl;
     std::cout << "描画処理時間合計: " << drawing_sum << " 秒" << std::endl;
+    std::cout << "待機時間合計: " << wait_sum << " 秒" << std::endl;
     std::cout << "合計時間: " << (getting_frame_sum + detection_sum + tracking_sum) << " 秒" << std::endl;
     /***********************************************************/
 

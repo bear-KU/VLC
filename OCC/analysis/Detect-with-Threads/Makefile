@@ -1,28 +1,26 @@
-# Makefile
-
 # コンパイラ
 CXX := g++
 
 # ソースファイル
 SRC := detect.cpp tracker_thread.cpp read_frame.cpp
 
-# 出力ファイル
-TARGET := detect
+# 基本のコンパイルフラグ
+CXXFLAGS := -std=c++17 -O3 -pthread
 
-# OpenCVフラグ
-OPENCV_FLAGS := $(shell pkg-config --cflags --libs opencv4)
-
-# FFmpegフラグ
-FFMPEG_FLAGS := -lavformat -lavcodec -lswscale -lavutil
+# OpenCV & FFmpeg フラグ
+LIBS := $(shell pkg-config --cflags --libs opencv4) -lavformat -lavcodec -lswscale -lavutil
 
 # デフォルトターゲット
-all: $(TARGET)
+all: detect
 
-# コンパイルルール
-$(TARGET): $(SRC)
-	$(CXX) $(SRC) -o $(TARGET) $(OPENCV_FLAGS) $(FFMPEG_FLAGS)
+# 描画なし (デフォルト)
+detect: $(SRC)
+	$(CXX) $(CXXFLAGS) $(SRC) -o detect $(LIBS)
 
-# クリーンアップ
+# 描画あり
+view: $(SRC)
+	$(CXX) $(CXXFLAGS) -DENABLE_GUI $(SRC) -o view $(LIBS)
+
+# クリーンアップ (両方のファイルを消す)
 clean:
-	rm -f $(TARGET)
-
+	rm -f detect view
