@@ -160,9 +160,9 @@ DecodeResult decodeFromStates(int id, double& T_frames, const std::vector<std::p
         const auto& state = states[i];
         if (!state.first) continue;
         double ratio = state.second / T_frames;
-        if (ratio < 1.5) result.bits += "0";
-        else if (ratio >= 1.5 && ratio < 4.0) result.bits += "1";
-        else if (ratio >= 4.0) break;
+        if (ratio < 1.8) result.bits += "0";
+        else if (ratio >= 1.8 && ratio < 4.5) result.bits += "1";
+        else if (ratio >= 4.5) break;
     }
     result.ascii = binaryToAscii(result.bits);
     return result;
