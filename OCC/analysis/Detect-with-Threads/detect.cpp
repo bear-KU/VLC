@@ -4,17 +4,26 @@
 #include <atomic>
 #include <algorithm> // std::remove_ifのために追加
 
+
+#define AREA_LIMIT 1
+
+#ifdef AREA_LIMIT
+// --- [ADD] 定数定義（main関数の上あたり、またはmain内に記述） ---
+const int IGNORE_MARGIN_X = 300; // 左右の無視する幅 (ピクセル)
+const int IGNORE_MARGIN_Y = 300; // 上下の無視する幅 (ピクセル)
+#endif
+
 // --- メインスレッド側で使われる定数と変数 ---
-const double DETECTION_THRESHOLD = 200.0;
+const double DETECTION_THRESHOLD = 175.0;
 
 // [MOD] 最終的に必要な面積（マージ後の判定用）
 const double MIN_CONTOUR_AREA = 200.0;
 
 // [ADD] スレッド内での仮フィルタ用（ノイズ除去用）
 // 分割された「破片」も通過させるため、十分に小さく設定する
-const double MIN_FRAGMENT_AREA = 50.0; 
+const double MIN_FRAGMENT_AREA = 1000.0; 
 
-const double MAX_CONTOUR_AREA = 100000.0;
+const double MAX_CONTOUR_AREA = 1000.0;
 const int MISS_COUNT_FOR_DELETION = 50; // トラッカー削除までの許容ミスフレーム数(調整必要)
 int tracker_id_counter = 0;
 
@@ -344,8 +353,8 @@ int main(int argc, char *argv[])
     }
 
 #ifdef ENABLE_GUI
-    // cv::namedWindow("gray", cv::WINDOW_NORMAL);
-    // cv::resizeWindow("gray", 900, 1200);
+    cv::namedWindow("gray", cv::WINDOW_NORMAL);
+    cv::resizeWindow("gray", 900, 1200);
     cv::namedWindow("Detection View", cv::WINDOW_NORMAL);
     cv::resizeWindow("Detection View", 900, 1200);
 #endif
@@ -399,13 +408,28 @@ int main(int argc, char *argv[])
         cv::cvtColor(cv_frame, gray, cv::COLOR_BGR2GRAY);
         cv::GaussianBlur(gray, gray, cv::Size(5, 5), 0);
 
-        // // DEBUG: 二値画像描画
-        // cv::Mat thresh;
-        // cv::threshold(gray, thresh, DETECTION_THRESHOLD, 255, cv::THRESH_BINARY);
-        // cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
-        // cv::morphologyEx(thresh, thresh, cv::MORPH_OPEN, kernel);
-        // cv::morphologyEx(thresh, thresh, cv::MORPH_CLOSE, kernel);
-        // cv::imshow("gray", thresh);
+#ifdef AREA_LIMIT
+        // 左側の帯を黒塗り
+        cv::rectangle(gray, cv::Rect(0, 0, IGNORE_MARGIN_X, gray.rows), cv::Scalar(0), cv::FILLED);
+        
+        // 右側の帯を黒塗り
+        cv::rectangle(gray, cv::Rect(gray.cols - IGNORE_MARGIN_X, 0, IGNORE_MARGIN_X, gray.rows), cv::Scalar(0), cv::FILLED);
+        
+        // 上側の帯を黒塗り
+        cv::rectangle(gray, cv::Rect(0, 0, gray.cols, IGNORE_MARGIN_Y), cv::Scalar(0), cv::FILLED);
+        
+        // 下側の帯を黒塗り
+        cv::rectangle(gray, cv::Rect(0, gray.rows - IGNORE_MARGIN_Y, gray.cols, IGNORE_MARGIN_Y), cv::Scalar(0), cv::FILLED);
+#endif
+
+
+        // DEBUG: 二値画像描画
+        cv::Mat thresh;
+        cv::threshold(gray, thresh, DETECTION_THRESHOLD, 255, cv::THRESH_BINARY);
+        cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
+        cv::morphologyEx(thresh, thresh, cv::MORPH_OPEN, kernel);
+        cv::morphologyEx(thresh, thresh, cv::MORPH_CLOSE, kernel);
+        cv::imshow("gray", thresh);
 
         std::vector<Detection> detections = detector_pool.detect(gray);
         std::vector<bool> matched(detections.size(), false);
@@ -419,7 +443,7 @@ int main(int argc, char *argv[])
         for (auto& tracker : activeTrackers)
         {
             int best_index = -1;
-            double best_dist = 15.0;
+            double best_dist = 10.0;
             for (size_t i = 0; i < detections.size(); ++i)
             {
                 if (matched[i]) continue;
